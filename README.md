@@ -122,6 +122,15 @@ coloured for banks and finance companies; negative margins or growth red, growth
 The Analysis card adds the portfolio's sector split, value-weighted P/E and ROE, expected yearly dividend, and how many
 holdings are loss-making. Data comes from Yahoo Finance, is refreshed daily, and can lag the latest quarterly results.
 
+### Good / poor colouring
+
+Each company gets a fundamentals grade: +1 each for ROE ≥ 15%, debt/equity ≤ 0.5 (not for banks/finance), profit margin
+≥ 15%, sales growth ≥ 10% and profit growth ≥ 10%; −1 each for ROE < 8%, debt/equity > 1.5, negative margin, shrinking
+sales or falling profit; −2 if loss-making. **+2 or more = Good (green), −2 or less = Poor (red)**, otherwise Average (no colour).
+The **Colour by** picker above the holdings switches between *Fundamentals*, *Price trend* (Strong/Weak signal),
+*Both agree* (green only if good fundamentals **and** a strong trend, red only if both are poor/weak) and *Off*.
+Tap ⓘ to see the exact points behind a stock's grade.
+
 ## Analysis (Strong / Neutral / Weak)
 
 The **Analysis** card checks every holding against its last year of daily prices, with the NIFTY 50 as the market

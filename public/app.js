@@ -432,7 +432,7 @@ function computeRows() {
     const display = resolved ? q.symbol.replace(/\.NS$/, '').replace(/^(.*)\.BO$/, 'BSE:$1')
       : ISIN_RE.test(h.symbol) && h.name ? h.name.replace(/\s+(Limited|Ltd\.?)$/i, '') : h.symbol;
     return {
-      fd: fund?.items?.[h.symbol] || null, ...fundFields(fund?.items?.[h.symbol]),
+      fd: fund?.items?.[h.symbol] || null, ...fundFields(fund?.items?.[h.symbol]), fg: fundGrade(fund?.items?.[h.symbol]),
       an: analysis?.items?.[h.symbol] || null, sig: analysis?.items?.[h.symbol]?.signal || null,
       sigScore: analysis?.items?.[h.symbol]?.score ?? (analysis?.items?.[h.symbol] ? -99 : null),
       i, ...h, q, live, price, invested, current, display, key: resolved ? display : h.symbol, name: resolved ? q.name || h.name : h.name || q.name, acctTag: multi ? h.accountLabel || 'Other' : '',
@@ -518,7 +518,7 @@ function render() {
     const sub = `<div class="nm" title="${esc(r.isin || '')}">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div>` + (r.q.error ? `<div class="err">⚠ ${esc(r.q.error)}</div>` : '');
     const avgCell = `<td>${avgInput(r)}</td>`;
     const stale = r.price != null && !r.live ? `<span class="stale">statement${r.refDate ? ' ' + esc(r.refDate) : ''}</span>` : '';
-    return `<tr>
+    return `<tr class="hl-${highlight(r)}">
       <td class="l"><div class="sym">${esc(r.display)} <button class="infobtn" data-info="${r.i}" title="Company details">ⓘ</button></div>${sub}</td>
       <td>${num.format(r.qty)}</td>
       ${avgCell}
@@ -541,7 +541,7 @@ function render() {
     const flash = prev != null && r.price != null && prev !== r.price ? (r.price > prev ? 'flash-up' : 'flash-down') : '';
     const stale = r.price != null && !r.live ? ' <span class="muted small">(stmt)</span>' : '';
     const cost = `<label class="costin"><span class="muted">Buy ₹</span>${avgInput(r)}${r.invested != null ? `<span class="muted small">Inv ${fmt(r.invested, inr0)}</span>` : ''}</label>`;
-    return `<div class="hcard" data-card="${r.i}">
+    return `<div class="hcard hl-${highlight(r)}" data-card="${r.i}">
       <div class="r1"><div><div class="sym">${esc(r.display)} ${sigBadge(r)} <button class="infobtn" data-info="${r.i}" title="Company details">ⓘ</button></div><div class="nm">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div></div>
         <div class="val">${fmt(r.current)}</div></div>
       <div class="r2"><span class="muted">${num.format(r.qty)} × <b class="${flash}" style="color:var(--text)">${fmt(r.price)}</b>${stale}</span>
@@ -552,6 +552,9 @@ function render() {
     </div>`;
   }).join('');
   renderFundTable(view);
+  const hlm = prefs.hl || 'fund';
+  $('hlLegend').innerHTML = hlm === 'off' ? '' : `<span class="hlkey good"></span>${hlm === 'trend' ? 'Strong trend' : hlm === 'both' ? 'Good + strong' : 'Good'}
+    <span class="hlkey poor"></span>${hlm === 'trend' ? 'Weak trend' : hlm === 'both' ? 'Poor + weak' : 'Poor'}`;
   const fv = prefs.view === 'fund';
   $('viewPrices').classList.toggle('on', !fv); $('viewFund').classList.toggle('on', fv);
   $('pricesWrap').hidden = fv; $('fundWrap').hidden = !fv;
@@ -656,6 +659,32 @@ function fundFields(f) {
     fDe: f.debtToEquity, fPm: f.profitMargin, fRg: f.revenueGrowth, fEg: f.earningsGrowth, fDy: f.dividendYield ?? 0, fProm: f.promoters };
 }
 // Rule-of-thumb colouring (facts, not verdicts)
+// Fundamentals quality grade from the company's own numbers (same thresholds as the colours).
+function fundGrade(f) {
+  if (!f || f.error || f.type === 'ETF') return null;
+  const R = [], add = (p, t) => R.push({ pts: p, text: t });
+  const fin = FIN_SECTOR.test(f.sector || '');
+  if (f.pe == null && f.eps != null && f.eps < 0) add(-2, 'Loss-making (negative earnings over the last 12 months)');
+  if (f.roe != null) { if (f.roe >= 15) add(1, `ROE ${f.roe.toFixed(1)}% (15% or more)`); else if (f.roe < 8) add(-1, `ROE ${f.roe.toFixed(1)}% (below 8%)`); }
+  if (f.debtToEquity != null && !fin) { if (f.debtToEquity <= 0.5) add(1, `Low debt: debt/equity ${f.debtToEquity.toFixed(2)}`); else if (f.debtToEquity > 1.5) add(-1, `High debt: debt/equity ${f.debtToEquity.toFixed(2)}`); }
+  if (f.profitMargin != null) { if (f.profitMargin >= 15) add(1, `Profit margin ${f.profitMargin.toFixed(1)}% (15% or more)`); else if (f.profitMargin < 0) add(-1, `Negative profit margin (${f.profitMargin.toFixed(1)}%)`); }
+  if (f.revenueGrowth != null) { if (f.revenueGrowth >= 10) add(1, `Sales growing ${f.revenueGrowth.toFixed(1)}%`); else if (f.revenueGrowth < 0) add(-1, `Sales shrinking ${f.revenueGrowth.toFixed(1)}%`); }
+  if (f.earningsGrowth != null) { if (f.earningsGrowth >= 10) add(1, `Profit growing ${f.earningsGrowth.toFixed(1)}%`); else if (f.earningsGrowth < 0) add(-1, `Profit falling ${f.earningsGrowth.toFixed(1)}%`); }
+  if (!R.length) return null;
+  const pts = R.reduce((a, r) => a + r.pts, 0);
+  return { grade: pts >= 2 ? 'good' : pts <= -2 ? 'poor' : 'avg', pts, reasons: R };
+}
+const GRADE = { good: 'Good fundamentals', avg: 'Average fundamentals', poor: 'Poor fundamentals' };
+// Which colour a stock gets, depending on the "Colour by" choice.
+function highlight(r) {
+  const mode = prefs.hl || 'fund';
+  const fq = r.fg?.grade, tr = r.sig === 'strong' ? 'good' : r.sig === 'weak' ? 'poor' : r.sig ? 'avg' : null;
+  if (mode === 'off') return '';
+  if (mode === 'fund') return fq === 'good' || fq === 'poor' ? fq : '';
+  if (mode === 'trend') return tr === 'good' || tr === 'poor' ? tr : '';
+  return fq && fq === tr && fq !== 'avg' ? fq : ''; // both agree
+}
+
 function fcls(k, v, f) {
   if (v == null || !isFinite(v)) return '';
   switch (k) {
@@ -672,6 +701,7 @@ const nf1 = (v, suf = '') => (v == null || !isFinite(v) ? '—' : `${v.toFixed(M
 const crores = (v) => (v == null ? '—' : v >= 1e12 ? `₹${num.format(Math.round(v / 1e7))} Cr` : `₹${(v / 1e7).toLocaleString('en-IN', { maximumFractionDigits: v >= 1e10 ? 0 : 1 })} Cr`);
 // Rough SEBI-style bands (the official lists rank by size: top 100 large, next 150 mid).
 const capBand = (v) => (v == null ? '' : v >= 1e12 ? 'Large cap' : v >= 3e11 ? 'Mid cap' : v >= 5e10 ? 'Small cap' : 'Micro cap');
+const gradeTag = (g) => (g ? `<span class="grade ${g.grade}" title="Fundamentals score ${g.pts > 0 ? '+' : ''}${g.pts}">${g.grade === 'good' ? '● Good' : g.grade === 'poor' ? '● Poor' : '● Avg'}</span>` : '');
 const peText = (f) => (f?.pe != null ? nf1(f.pe) : f?.eps != null && f.eps < 0 ? 'Loss' : '—');
 
 function fundLine(r) {
@@ -679,7 +709,7 @@ function fundLine(r) {
   if (!f) return fundLoading ? '<div class="fund muted">Loading fundamentals…</div>' : '';
   if (f.error) return `<div class="fund muted">No company data (${esc(f.error)})</div>`;
   const it = (k, v, c) => `<span>${k} <b class="${c}">${v}</b></span>`;
-  return `<div class="fund"><span class="sec">${esc([f.sector, capBand(f.marketCap)].filter(Boolean).join(' · ') || f.type || '')}</span>
+  return `<div class="fund"><span class="sec">${gradeTag(r.fg)} ${esc([f.sector, capBand(f.marketCap)].filter(Boolean).join(' · ') || f.type || '')}</span>
     ${it('P/E', peText(f), fcls('pe', f.pe ?? (f.eps < 0 ? -1 : null)))}${it('P/B', nf1(f.pb), '')}${it('ROE', nf1(f.roe, '%'), fcls('roe', f.roe))}
     ${it('D/E', nf1(f.debtToEquity), fcls('de', f.debtToEquity, f))}${it('Margin', nf1(f.profitMargin, '%'), fcls('pm', f.profitMargin))}
     ${it('Sales gr.', nf1(f.revenueGrowth, '%'), fcls('gr', f.revenueGrowth))}${it('Div', nf1(f.dividendYield ?? 0, '%'), fcls('dy', f.dividendYield))}</div>`;
@@ -691,8 +721,8 @@ function renderFundTable(view) {
     const f = r.fd;
     const name = `<td class="l"><div class="sym">${esc(r.display)} <button class="infobtn" data-info="${r.i}" title="Company details">ⓘ</button></div><div class="nm">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div></td>`;
     if (!f || f.error) return `<tr>${name}<td class="l muted small" colspan="11">${f?.error ? 'No company data — ' + esc(f.error) : fundLoading ? 'Loading…' : '—'}</td></tr>`;
-    return `<tr>${name}
-      <td class="l"><div class="sec" title="${esc(f.industry || '')}">${esc(f.sector || f.type || '—')}</div><div class="nm">${esc(f.industry || '')}</div></td>
+    return `<tr class="hl-${highlight(r)}">${name}
+      <td class="l"><div class="sec" title="${esc(f.industry || '')}">${gradeTag(r.fg)} ${esc(f.sector || f.type || '—')}</div><div class="nm">${esc(f.industry || '')}</div></td>
       <td>${crores(f.marketCap)}<span class="cap">${capBand(f.marketCap)}</span></td>
       ${td(peText(f), fcls('pe', r.fPe))}${td(nf1(f.pb))}${td(nf1(f.roe, '%'), fcls('roe', f.roe))}${td(nf1(f.debtToEquity), fcls('de', f.debtToEquity, f))}
       ${td(nf1(f.profitMargin, '%'), fcls('pm', f.profitMargin))}${td(nf1(f.revenueGrowth, '%'), fcls('gr', f.revenueGrowth))}${td(nf1(f.earningsGrowth, '%'), fcls('gr', f.earningsGrowth))}
@@ -743,6 +773,7 @@ function portfolioFundamentals(rows) {
       <span>ROE (value-weighted) <b class="${fcls('roe', roe)}">${nf1(roe, '%')}</b></span>
       <span>Dividend yield <b>${((divInc / total) * 100).toFixed(2)}%</b> <span class="muted small">≈ ${fmt(divInc, inr0)}/yr</span></span>
       <span>Loss-making <b class="${loss.length ? 'down' : ''}">${loss.length}</b> <span class="muted small">of ${withF.length}</span></span>
+      <span>Grades: <b class="up">${rows.filter((r) => r.fg?.grade === 'good').length} good</b> · <b>${rows.filter((r) => r.fg?.grade === 'avg').length} average</b> · <b class="down">${rows.filter((r) => r.fg?.grade === 'poor').length} poor</b></span>
     </div>
     <div class="sectorbar">${secs.map(([k, v], i) => `<span style="width:${(v / total) * 100}%;background:${COLORS[i % COLORS.length]}" title="${esc(k)} ${((v / total) * 100).toFixed(1)}%"></span>`).join('')}</div>
     <div class="legend">${secs.map(([k, v], i) => `<span><i style="background:${COLORS[i % COLORS.length]}"></i>${esc(k)} <span class="muted">${((v / total) * 100).toFixed(1)}%</span></span>`).join('')}</div>
@@ -759,7 +790,8 @@ function openDetails(i) {
   const d = r.an?.ind || {};
   $('sigBody').innerHTML = `<h3>${esc(r.display)} ${g ? `<span class="sig ${sigGroup(r.sig)}">${g.icon} ${g.label}${r.an.score != null ? ` · ${r.an.score > 0 ? '+' : ''}${r.an.score}` : ''}</span>` : ''}</h3>
     <div class="muted small">${esc(r.name || '')}${r.acctTag ? ' · ' + esc(r.acctTag) : ''}${r.isin ? ' · ' + esc(r.isin) : ''}</div>
-    <h4 class="dsec">Fundamentals</h4>
+    <h4 class="dsec">Fundamentals ${gradeTag(r.fg)}</h4>
+    ${r.fg ? `<ul>${r.fg.reasons.map((x) => `<li><b class="${x.pts > 0 ? 'up' : 'down'}">${x.pts > 0 ? '+' + x.pts : x.pts}</b><span>${esc(x.text)}</span></li>`).join('')}</ul>` : ''}
     ${f ? `<div class="muted small">${esc([f.sector, f.industry, capBand(f.marketCap)].filter(Boolean).join(' · '))}${f.employees ? ` · ${num.format(f.employees)} employees` : ''}</div>
     ${f.about ? `<p class="about">${esc(f.about)}${f.about.length >= 600 ? '…' : ''}</p>` : ''}
     <div class="kv">
@@ -981,6 +1013,8 @@ document.addEventListener('click', (e) => {
   if (ib) { e.stopPropagation(); openDetails(Number(ib.dataset.info)); }
 }, true);
 $('anaRefresh').addEventListener('click', () => { loadAnalysis(true); loadFundamentals(true); });
+$('hlSel').value = prefs.hl || 'fund';
+$('hlSel').addEventListener('change', (e) => { prefs.hl = e.target.value; save(); render(); });
 $('viewPrices').addEventListener('click', () => { prefs.view = 'prices'; save(); render(); });
 $('viewFund').addEventListener('click', () => { prefs.view = 'fund'; save(); render(); loadFundamentals(); });
 $('fundTable').addEventListener('click', (e) => {
