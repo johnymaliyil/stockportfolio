@@ -7,7 +7,9 @@ const LS_PREF = 'portfolio.prefs.v1';
 // `account` is the demat account (DP/BO ID) a statement came from; each account is replaced independently on upload.
 let holdings = load(LS_KEY, []);
 let prefs = load(LS_PREF, { sortKey: 'current', sortAsc: false, refresh: 15, theme: null, account: 'all' });
-let quotes = {};                          // symbol -> quote
+const LS_QUOTES = 'portfolio.quotes.v1';
+const cachedQuotes = load(LS_QUOTES, null); // last prices seen, so the app opens instantly / offline
+let quotes = cachedQuotes?.quotes || {};   // symbol -> quote
 let prevPrices = {};                      // symbol -> last price, for flash animation
 let timer = null;
 let editingIndex = -1;
@@ -38,7 +40,8 @@ const ALIASES = {
   symbol: ['symbol', 'tradingsymbol', 'instrument', 'stocksymbol', 'nsesymbol', 'scripcode', 'scrip', 'ticker', 'isin', 'isincode', 'isinno', 'stock', 'stockname', 'security', 'company', 'companyname', 'name', 'bsecode', 'nsecode'],
   qty: ['quantity', 'qty', 'shares', 'noofshares', 'quantityavailable', 'availableqty', 'holdingqty', 'totalqty', 'netqty', 'units'],
   name: ['scripname', 'companyname', 'securityname', 'stockname', 'instrumentname', 'name', 'company', 'security'],
-  ref: ['closingrate', 'closingprice', 'closeprice', 'ltp', 'lastprice', 'lasttradedprice', 'marketprice', 'currentprice', 'marketrate', 'cmp', 'prevclose', 'close', 'rate'],
+  isin: ['isin', 'isincode', 'isinno', 'isinnumber'],
+  ref: ['statementprice', 'closingrate', 'closingprice', 'closeprice', 'ltp', 'lastprice', 'lasttradedprice', 'marketprice', 'currentprice', 'marketrate', 'cmp', 'prevclose', 'close', 'rate'],
   value: ['totalvalue', 'marketvalue', 'currentvalue', 'presentvalue', 'holdingvalue', 'value'],
   avg: ['avgcost', 'averageprice', 'avgprice', 'averagecost', 'avgbuyprice', 'averagebuyprice', 'buyavg', 'buyprice', 'costprice', 'avgtradingprice', 'purchaseprice', 'buyrate', 'avgrate', 'avg', 'price'],
 };
@@ -100,6 +103,12 @@ function rowsToHoldings(rows) {
   const holder = pre.match(/\b(?:Client|Account|Holder)\s*Name\s*[:\-]?\s*([A-Za-z .]+)/i)?.[1].trim() || '';
   const asOn = pre.match(/\b(?:as\s*on|date)\b[^0-9A-Za-z]*(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|\d{1,2}-[A-Za-z]{3}-\d{4})/i)?.[1] || null;
   const get = (r, k) => (cols[k] >= 0 ? r[cols[k]] : undefined);
+  // Our own CSV export (and multi-account sheets) carry the account on every row.
+  const hdr = rows[hi].map(norm);
+  const idCol = hdr.findIndex((x) => ['accountid', 'boid', 'dpid', 'clientcode', 'clientid', 'demataccount'].includes(x));
+  const lblCol = hdr.findIndex((x) => ['account', 'accountname', 'accountlabel'].includes(x));
+  const dateCol = hdr.findIndex((x) => ['pricedate', 'priceasof', 'asof', 'asondate'].includes(x));
+  const perRow = idCol >= 0 || lblCol >= 0;
 
   const merged = new Map();
   let skipped = 0;
@@ -110,11 +119,19 @@ function rowsToHoldings(rows) {
     if (!(qty > 0)) { skipped++; continue; }
     const a = toNum(get(r, 'avg')), ref = toNum(get(r, 'ref')), val = toNum(get(r, 'value'));
     const name = String(get(r, 'name') ?? '').trim();
-    const h = { symbol, qty, avg: a >= 0 ? a : null };
-    if (ISIN_RE.test(symbol)) h.isin = symbol;
+    const isinCell = String(get(r, 'isin') ?? '').trim().toUpperCase();
+    const isin = ISIN_RE.test(isinCell) ? isinCell : ISIN_RE.test(symbol) ? symbol : null;
+    const h = { symbol: isin || symbol, qty, avg: a >= 0 ? a : null }; // ISIN is the most reliable key when present
+    if (isin) h.isin = isin;
+    if (perRow) {
+      const id = String((idCol >= 0 && r[idCol]) || (lblCol >= 0 && r[lblCol]) || '').trim();
+      h.account = id || null;
+      h.accountLabel = id ? String((lblCol >= 0 && r[lblCol]) || id).trim() : null;
+    }
     if (name) h.name = cleanName(name);
     if (ref > 0) h.refPrice = ref; else if (val > 0) h.refPrice = val / qty;
-    if (h.refPrice && asOn) h.refDate = asOn;
+    const rowDate = dateCol >= 0 ? String(r[dateCol] ?? '').trim() : '';
+    if (h.refPrice && (rowDate || asOn)) h.refDate = rowDate || asOn;
     addMerged(merged, h);
   }
   if (!merged.size) throw new Error('No valid rows found (need a quantity above 0).');
@@ -124,8 +141,12 @@ function rowsToHoldings(rows) {
 
 // Combine repeated rows for the same stock, weighting the buy price by quantity.
 function addMerged(map, h) {
-  const m = map.get(h.symbol);
-  if (!m) return map.set(h.symbol, h);
+  const key = (h.account ?? '') + '|' + h.symbol;
+  const m = map.get(key);
+  if (!m) return map.set(key, h);
+  mergeInto(m, h);
+}
+function mergeInto(m, h) {
   const q = m.qty + h.qty;
   m.avg = m.avg != null && h.avg != null ? (m.avg * m.qty + h.avg * h.qty) / q : null;
   m.qty = q;
@@ -253,24 +274,25 @@ async function importFile(file) {
   if (!file) return;
   try {
     const { list, skipped, account = null, label = null } = await readFile(file);
-    // Only the holdings of the account this file belongs to are replaced; other demat accounts stay.
-    const same = holdings.filter((h) => (h.account ?? null) === account);
-    const others = holdings.filter((h) => (h.account ?? null) !== account);
-    const where = account ? ` in account ${label}` : others.length ? ' that did not come from a DP statement' : '';
+    for (const h of list) if (!('account' in h)) Object.assign(h, { account, accountLabel: label });
+    // Only the holdings of the account(s) in this file are replaced; other demat accounts stay.
+    const ids = new Set(list.map((h) => h.account ?? null));
+    const same = holdings.filter((h) => ids.has(h.account ?? null));
+    const others = holdings.filter((h) => !ids.has(h.account ?? null));
+    const where = ids.size > 1 ? ` in ${ids.size} accounts` : account ? ` in account ${label}` : others.length ? ' that did not come from a DP statement' : '';
     if (same.length && !confirm(`Replace the ${same.length} holdings${where} with ${list.length} from "${file.name}"?\n\n`
       + `Buy prices you've already entered are kept for stocks that are still in the new file.${others.length ? ' Your other accounts are not changed.' : ''}`)) return;
     // A new statement usually has fresh quantities but no buy prices: keep the ones the user entered.
     let kept = 0;
     for (const h of list) {
-      Object.assign(h, { account, accountLabel: label });
       if (h.avg != null) continue;
-      const old = same.find((o) => o.symbol === h.symbol || (h.isin && o.isin === h.isin));
+      const old = same.find((o) => (o.account ?? null) === (h.account ?? null) && (o.symbol === h.symbol || (h.isin && o.isin === h.isin)));
       if (old?.avg != null) { h.avg = old.avg; kept++; }
     }
     holdings = [...others, ...list]; quotes = {}; prevPrices = {};
-    if (account && others.length) prefs.account = 'all';
+    if (others.length || ids.size > 1) prefs.account = 'all';
     save();
-    const verb = same.length ? 'Loaded' : others.length ? `Added account ${label || ''} with` : 'Loaded';
+    const verb = same.length || ids.size > 1 ? 'Loaded' : others.length ? `Added account ${label || ''} with` : 'Loaded';
     toast(`${verb} ${list.length} holdings${skipped ? `, skipped ${skipped} invalid rows` : ''}${kept ? `, kept ${kept} buy prices` : ''}.`);
     showView(); refresh();
   } catch (e) { toast(e.message, 6000); }
@@ -287,11 +309,13 @@ async function refresh() {
     const data = await res.json();
     for (const s of syms) if (quotes[s]?.price != null) prevPrices[s] = quotes[s].price;
     quotes = data.quotes || {};
+    try { localStorage.setItem(LS_QUOTES, JSON.stringify({ at: data.at, quotes })); } catch {}
     $('demoBadge').hidden = !data.mock;
     $('lastUpdated').textContent = 'Updated ' + new Date(data.at).toLocaleTimeString('en-IN');
     render();
   } catch (e) {
-    $('lastUpdated').textContent = 'Update failed — retrying';
+    const last = load(LS_QUOTES, null)?.at;
+    $('lastUpdated').textContent = (navigator.onLine ? 'Update failed' : 'Offline') + (last ? ` — prices from ${new Date(last).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '');
     console.error(e);
   } finally {
     $('refreshBtn').disabled = false;
@@ -351,7 +375,7 @@ function computeRows() {
     const display = resolved ? q.symbol.replace(/\.NS$/, '').replace(/^(.*)\.BO$/, 'BSE:$1')
       : ISIN_RE.test(h.symbol) && h.name ? h.name.replace(/\s+(Limited|Ltd\.?)$/i, '') : h.symbol;
     return {
-      i, ...h, q, live, price, invested, current, display, name: resolved ? q.name || h.name : h.name || q.name, acctTag: multi ? h.accountLabel || 'Other' : '',
+      i, ...h, q, live, price, invested, current, display, key: resolved ? display : h.symbol, name: resolved ? q.name || h.name : h.name || q.name, acctTag: multi ? h.accountLabel || 'Other' : '',
       changePct: live ? q.changePct : null, dayPnl: live && q.change != null ? q.change * h.qty : null,
       pnl: current != null && invested != null ? current - invested : null,
       pnlPct: current != null && invested ? ((current - invested) / invested) * 100 : null,
@@ -392,7 +416,7 @@ function render() {
   $('kPnlPct').className = 'sub ' + (pnlBase ? cls(pnl) : 'muted');
   const banner = $('costBanner');
   banner.hidden = !missing;
-  if (missing) banner.innerHTML = `<span><b>${missing} holding${missing > 1 ? 's have' : ' has'} no average buy price</b> <span class="muted">— DP statements don't include it. Click <b>Add</b> in the Avg cost column to enter it and see P&amp;L. Buy prices are kept when you upload a newer statement.</span></span>`;
+  if (missing) banner.innerHTML = `<span><b>${missing} holding${missing > 1 ? 's have' : ' has'} no average buy price</b> <span class="muted">— DP statements don't include it. Enter it with <b>Add</b> / <b>+ Add buy price</b> next to each stock to see P&amp;L. Buy prices are kept when you upload a newer statement.</span></span>`;
   $('kDay').textContent = signed(day); $('kDay').className = 'value ' + cls(day);
   $('kDayPct').textContent = prevVal ? pct((day / prevVal) * 100) : ''; $('kDayPct').className = 'sub ' + cls(day);
   document.title = `${signed(day, inr0)} · My Portfolio`;
@@ -446,6 +470,25 @@ function render() {
     </tr>`;
   }).join('');
 
+  // Phone layout: one card per holding.
+  $('cards').innerHTML = view.map((r) => {
+    const prev = prevPrices[r.symbol];
+    const flash = prev != null && r.price != null && prev !== r.price ? (r.price > prev ? 'flash-up' : 'flash-down') : '';
+    const stale = r.price != null && !r.live ? ' <span class="muted small">(stmt)</span>' : '';
+    const cost = r.avg == null
+      ? `<button class="addcost" data-card="${r.i}">+ Add buy price</button>`
+      : `<span class="muted">Avg ${fmt(r.avg)} · Inv ${fmt(r.invested, inr0)}</span>`;
+    return `<div class="hcard" data-card="${r.i}">
+      <div class="r1"><div><div class="sym">${esc(r.display)}</div><div class="nm">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div></div>
+        <div class="val">${fmt(r.current)}</div></div>
+      <div class="r2"><span class="muted">${num.format(r.qty)} × <b class="${flash}" style="color:var(--text)">${fmt(r.price)}</b>${stale}</span>
+        <span class="${cls(r.changePct)}">${r.dayPnl != null ? signed(r.dayPnl, inr0) + ' ' : ''}<span class="chg ${cls(r.changePct)}">${pct(r.changePct)}</span></span></div>
+      <div class="r3">${cost}<span class="${cls(r.pnl)}">${r.pnl != null ? `${signed(r.pnl, inr0)} (${pct(r.pnlPct)})` : ''}</span></div>
+      ${r.q.error && !r.live ? `<div class="err">⚠ ${esc(r.q.error)}</div>` : ''}
+    </div>`;
+  }).join('');
+  $('sortSel').value = ['current', 'changePct', 'pnl', 'pnlPct', 'symbol'].includes(k) ? k : 'current';
+
   document.querySelectorAll('#holdings th[data-k]').forEach((th) => {
     th.classList.toggle('sorted', th.dataset.k === k);
     th.classList.toggle('asc', th.dataset.k === k && prefs.sortAsc);
@@ -465,7 +508,9 @@ function openEdit(i) {
   const f = $('editForm'), h = holdings[i] || { symbol: '', qty: '', avg: '' };
   $('editTitle').textContent = i >= 0 ? 'Edit holding' : 'Add holding';
   f.symbol.value = h.symbol; f.qty.value = h.qty; f.avg.value = h.avg ?? '';
+  $('editTitle').textContent = i >= 0 ? (h.name || h.symbol) : 'Add holding';
   $('editDlg').showModal();
+  if (i >= 0) { f.avg.focus(); f.avg.select(); }
 }
 
 $('editDlg').addEventListener('close', () => {
@@ -482,7 +527,7 @@ $('editDlg').addEventListener('close', () => {
     const acct = selectedAccount() === 'all' ? null : selectedAccount();
     const label = acct ? accounts().find((a) => a.id === acct)?.label : null;
     const ex = holdings.find((h) => (h.account ?? null) === acct && (h.symbol === item.symbol || h.isin === item.symbol));
-    if (ex) addMerged(new Map([[ex.symbol, ex]]), { ...item, symbol: ex.symbol });
+    if (ex) mergeInto(ex, item);
     else holdings.push({ ...item, account: acct, accountLabel: label });
   }
   save(); showView(); refresh();
@@ -521,8 +566,9 @@ $('clearBtn').addEventListener('click', () => {
 $('acctSel').addEventListener('change', (e) => { prefs.account = e.target.value; save(); render(); });
 $('exportBtn').addEventListener('click', () => {
   const rows = computeRows();
-  const lines = [['Account', 'Symbol', 'ISIN', 'Name', 'Quantity', 'Avg Price', 'LTP', 'Day %', 'Invested', 'Current', 'P&L', 'P&L %'].join(',')]
-    .concat(rows.map((r) => [r.accountLabel || '', r.display, r.isin || '', r.name || '', r.qty, r.avg?.toFixed(2) ?? '', r.price?.toFixed(2) ?? '', r.changePct?.toFixed(2) ?? '',
+  const lines = [['Account', 'Account ID', 'Symbol', 'ISIN', 'Name', 'Quantity', 'Avg Price', 'LTP', 'Price Date', 'Day %', 'Invested', 'Current', 'P&L', 'P&L %'].join(',')]
+    .concat(rows.map((r) => [r.accountLabel || '', r.account || '', r.key, r.isin || '', r.name || '', r.qty, r.avg?.toFixed(2) ?? '', r.price?.toFixed(2) ?? '',
+      r.live ? new Date(r.q.time || Date.now()).toLocaleDateString('en-IN') : r.refDate || '', r.changePct?.toFixed(2) ?? '',
       r.invested?.toFixed(2) ?? '', r.current?.toFixed(2) ?? '', r.pnl?.toFixed(2) ?? '', r.pnlPct?.toFixed(2) ?? ''].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')));
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
@@ -566,6 +612,54 @@ $('holdings').addEventListener('keydown', (e) => {
 });
 $('holdings').addEventListener('focusout', (e) => { if (e.target.classList.contains('avgin') && e.target.value.trim()) commitAvg(e.target); else if (e.target.classList.contains('avgin')) setTimeout(render); });
 
+$('cards').addEventListener('click', (e) => {
+  const c = e.target.closest('[data-card]');
+  if (c) openEdit(Number(c.dataset.card));
+});
+$('sortSel').addEventListener('change', (e) => {
+  prefs.sortKey = e.target.value; prefs.sortAsc = e.target.value === 'symbol'; save(); render();
+});
+// close the "More" menu after picking something / tapping elsewhere
+document.addEventListener('click', (e) => {
+  const m = document.querySelector('details.menu');
+  if (m?.open && (!m.contains(e.target) || e.target.closest('.menulist button'))) m.open = false;
+});
+$('fileInput2').addEventListener('click', () => setTimeout(() => (document.querySelector('details.menu').open = false), 0));
+
+// ---------- PWA: offline support + install ----------
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW registration failed', e));
+}
+let installEvt = null;
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+function installBanner(html) {
+  if (standalone || prefs.installDismissed) return;
+  const b = $('installBanner');
+  b.innerHTML = `<span>${html}</span><span class="row">${installEvt ? '<button class="btn primary" data-install>Install</button>' : ''}<button class="btn" data-dismiss>Not now</button></span>`;
+  b.hidden = false;
+}
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); installEvt = e;
+  $('installBtn').hidden = false;
+  installBanner('<b>Install My Portfolio</b> <span class="muted">— add it to your home screen and open it like an app.</span>');
+});
+async function doInstall() {
+  if (!installEvt) return;
+  installEvt.prompt(); await installEvt.userChoice; installEvt = null;
+  $('installBtn').hidden = true; $('installBanner').hidden = true;
+}
+$('installBtn').addEventListener('click', doInstall);
+$('installBanner').addEventListener('click', (e) => {
+  if (e.target.closest('[data-install]')) doInstall();
+  if (e.target.closest('[data-dismiss]')) { prefs.installDismissed = true; save(); $('installBanner').hidden = true; }
+});
+if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !standalone) {
+  const tip = '<b>Install on iPhone:</b> <span class="muted">open this page in Safari, tap the Share button, then “Add to Home Screen”.</span>';
+  $('installHint').innerHTML = tip; $('installHint').hidden = false;
+  installBanner(tip);
+}
+window.addEventListener('online', refresh);
+
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 
 function applyTheme() { if (prefs.theme) document.documentElement.dataset.theme = prefs.theme; else delete document.documentElement.dataset.theme; }
@@ -576,6 +670,7 @@ $('themeBtn').addEventListener('click', () => {
 
 // ---------- boot ----------
 applyTheme();
+if (cachedQuotes?.at) $('lastUpdated').textContent = 'Prices from ' + new Date(cachedQuotes.at).toLocaleTimeString('en-IN');
 updateMarketStatus();
 showView();
 refresh();

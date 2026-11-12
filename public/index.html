@@ -2,9 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>My Portfolio</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230f766e'/><path d='M6 22l7-7 5 4 8-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+  <meta name="description" content="Track your Indian stock holdings with live NSE/BSE prices." />
+  <meta name="theme-color" content="#0f766e" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Portfolio" />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
@@ -17,12 +25,12 @@
       <h1>My Portfolio</h1>
       <span id="marketStatus" class="pill">—</span>
       <span id="demoBadge" class="pill warn" hidden>Demo prices</span>
-      <select id="acctSel" title="Demat account" hidden></select>
     </div>
     <div class="actions">
+      <select id="acctSel" title="Demat account" hidden></select>
       <span id="lastUpdated" class="muted small"></span>
       <label class="small muted" title="Auto-refresh interval">
-        Refresh
+        <span class="hide-sm">Refresh</span>
         <select id="refreshSel">
           <option value="5">5s</option>
           <option value="15" selected>15s</option>
@@ -53,7 +61,8 @@
           <button id="loadSampleBtn" class="btn">Try the sample</button>
         </div>
         <p class="muted small">Symbols: <code>RELIANCE</code> or <code>NSE:RELIANCE</code> for NSE, <code>BSE:500325</code> or <code>500325</code> for BSE.
-          Your portfolio stays in this browser and is never uploaded anywhere.</p>
+          Your portfolio stays on this device and is never uploaded anywhere.</p>
+        <p id="installHint" class="muted small" hidden></p>
       </div>
     </section>
 
@@ -67,6 +76,7 @@
       </div>
 
       <div id="costBanner" class="card banner" hidden></div>
+      <div id="installBanner" class="card banner info" hidden></div>
 
       <div class="card">
         <div class="cardhead">
@@ -82,13 +92,27 @@
           <h2>Holdings</h2>
           <div class="row">
             <input id="search" type="search" placeholder="Filter…" />
+            <select id="sortSel" class="show-sm" aria-label="Sort by">
+              <option value="current">Value</option>
+              <option value="changePct">Day %</option>
+              <option value="pnl">P&amp;L</option>
+              <option value="pnlPct">P&amp;L %</option>
+              <option value="symbol">Name</option>
+            </select>
             <button id="addBtn" class="btn">+ Add</button>
-            <label class="btn">Upload new<input id="fileInput2" type="file" accept=".csv,.xlsx,.xlsm,.xls,.txt,.pdf" hidden /></label>
-            <button id="exportBtn" class="btn">Export CSV</button>
-            <button id="clearBtn" class="btn danger">Clear</button>
+            <details class="menu">
+              <summary class="btn">More ▾</summary>
+              <div class="menulist card">
+                <label class="btn">Upload statement / file<input id="fileInput2" type="file" accept=".csv,.xlsx,.xlsm,.xls,.txt,.pdf" hidden /></label>
+                <button id="exportBtn" class="btn">Export CSV (backup)</button>
+                <button id="installBtn" class="btn" hidden>Install app</button>
+                <button id="clearBtn" class="btn danger">Clear</button>
+              </div>
+            </details>
           </div>
         </div>
-        <div class="tablewrap">
+        <div id="cards" class="cards"></div>
+        <div class="tablewrap hide-sm">
           <table id="holdings">
             <thead>
               <tr>
@@ -117,8 +141,8 @@
     <form method="dialog" id="editForm">
       <h3 id="editTitle">Add holding</h3>
       <label>Symbol <input name="symbol" required placeholder="e.g. RELIANCE, BSE:500325 or an ISIN" /></label>
-      <label>Quantity <input name="qty" type="number" step="any" min="0" required /></label>
-      <label>Average buy price (₹) <input name="avg" type="number" step="any" min="0" placeholder="Optional, needed for P&amp;L" /></label>
+      <label>Quantity <input name="qty" type="number" inputmode="decimal" step="any" min="0" required /></label>
+      <label>Average buy price (₹) <input name="avg" type="number" inputmode="decimal" step="any" min="0" placeholder="Optional, needed for P&amp;L" /></label>
       <div class="row end">
         <button value="cancel" class="btn" formnovalidate>Cancel</button>
         <button value="ok" class="btn primary">Save</button>

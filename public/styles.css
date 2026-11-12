@@ -128,9 +128,10 @@ td .err { color: var(--warn); font-size: 12px; }
 .wbar { display: inline-block; width: 40px; height: 6px; border-radius: 3px; background: var(--row-hover); margin-left: 6px; vertical-align: middle; overflow: hidden; }
 .wbar b { display: block; height: 100%; background: var(--accent); }
 
-dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text); padding: 20px; width: min(380px, calc(100vw - 32px)); }
+dialog { box-sizing: border-box; max-width: calc(100vw - 32px); border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text); padding: 20px; width: min(380px, calc(100vw - 32px)); }
 dialog::backdrop { background: rgba(0, 0, 0, .4); }
 dialog label { display: grid; gap: 4px; margin-bottom: 12px; font-size: 13px; }
+dialog input { width: 100%; min-width: 0; }
 
 .toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 20;
@@ -145,3 +146,52 @@ dialog label { display: grid; gap: 4px; margin-bottom: 12px; font-size: 13px; }
 .stale { color: var(--muted); font-size: 11px; display: block; font-weight: normal; }
 .acct { display: inline-block; font-size: 10px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); }
 #acctSel[hidden] { display: none; }
+
+/* ---------- PWA / phone ---------- */
+body { padding-bottom: env(safe-area-inset-bottom); }
+.topbar { padding-top: max(12px, env(safe-area-inset-top)); }
+.banner.info { border-color: var(--accent); }
+.show-sm { display: none; }
+.cards { display: none; }
+.menu { position: relative; }
+.menu summary { list-style: none; }
+.menu summary::-webkit-details-marker { display: none; }
+.menulist { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; display: grid; gap: 6px; padding: 8px; min-width: 220px; }
+.menulist .btn { justify-content: flex-start; width: 100%; }
+
+@media (max-width: 700px) {
+  .hide-sm { display: none !important; }
+  .show-sm { display: inline-block; }
+  .cards { display: grid; gap: 8px; }
+  main { padding: 12px; gap: 12px; }
+  #dashboard { gap: 12px; }
+  .card { padding: 14px; border-radius: 14px; }
+  .kpis { gap: 8px; }
+  .kpi { padding: 12px; }
+  .kpi .label { font-size: 11px; }
+  .kpi .sub { font-size: 12px; }
+  .topbar { padding-left: 12px; padding-right: 12px; gap: 6px; }
+  .topbar h1 { font-size: 16px; }
+  #lastUpdated { display: none; }
+  .brand, .actions { gap: 6px; }
+  .topbar .logo, #demoBadge { display: none; }
+  #acctSel { max-width: 46vw; }
+  .topbar .btn, .topbar select { padding: 4px 8px; }
+  .cardhead .row { width: 100%; }
+  #search { flex: 1; min-width: 0; width: auto; }
+  input, select { font-size: 16px; } /* stops iOS zooming into inputs */
+}
+
+.cards > * { min-width: 0; }
+.hcard { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: grid; gap: 4px; min-width: 0; cursor: pointer; }
+.hcard .r1 > div:first-child { min-width: 0; flex: 1; }
+.hcard .r1, .hcard .r2, .hcard .r3 { display: flex; justify-content: space-between; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.hcard .r2, .hcard .r3 { flex-wrap: wrap; }
+.hcard .r2 > :last-child, .hcard .r3 > :last-child { margin-left: auto; white-space: nowrap; }
+.hcard .sym { font-weight: 650; font-size: 15px; }
+.hcard .nm { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hcard .val { white-space: nowrap; }
+.hcard .val { font-weight: 650; font-size: 15px; font-variant-numeric: tabular-nums; }
+.hcard .r2, .hcard .r3 { font-size: 13px; font-variant-numeric: tabular-nums; }
+.hcard .addcost { border: 1px dashed var(--warn); color: var(--warn); background: none; border-radius: 6px; padding: 1px 8px; font: inherit; font-size: 12px; }
+.hcard .err { font-size: 11px; }

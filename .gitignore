@@ -1,3 +1,10 @@
 node_modules/
 .env
 *.log
+# personal portfolio data — never commit (the repo is public)
+*.pdf
+*.xls
+*.xlsx
+*.xlsm
+my-portfolio*
+portfolio-*.csv
