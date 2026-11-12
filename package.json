@@ -2,11 +2,12 @@
   "name": "stockportfolio",
   "version": "1.0.0",
   "description": "Real-time Indian stock (NSE/BSE) portfolio tracker",
-  "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "demo": "MOCK=1 node server.js"
+    "start": "node local-server.js",
+    "demo": "MOCK=1 node local-server.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "license": "MIT"
 }

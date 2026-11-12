@@ -106,7 +106,7 @@ symbols/ISINs are, so their prices can be fetched.
 
 ## How prices work
 
-`lib/quotes.js` (used by `server.js` locally and `api/quotes.js` on Vercel) maps ISINs to NSE symbols using NSE's published equity and ETF lists (refreshed every 12 hours), proxies Yahoo Finance's chart API (`/api/quotes?symbols=RELIANCE,TCS`), caches each symbol
+`lib/quotes.js` (used by `local-server.js` locally and `api/quotes.js` on Vercel) maps ISINs to NSE symbols using NSE's published equity and ETF lists (refreshed every 12 hours), proxies Yahoo Finance's chart API (`/api/quotes?symbols=RELIANCE,TCS`), caches each symbol
 for 5 seconds and fetches 8 at a time. NSE/BSE quotes from this source are near real-time, but they can
 lag the exchange by a little and are for personal tracking only. The "market open" badge goes by NSE
 hours (Mon–Fri 09:15–15:30 IST) and does not know about exchange holidays.

@@ -1,8 +1,8 @@
 // Indian stock portfolio tracker — zero-dependency Node server (Node 18+).
 // Serves the PWA from ./public and proxies live NSE/BSE quotes (browsers can't call Yahoo directly because of CORS).
 //
-//   node server.js            -> live quotes
-//   MOCK=1 node server.js     -> simulated quotes (offline demo)
+//   node local-server.js            -> live quotes
+//   MOCK=1 node local-server.js     -> simulated quotes (offline demo)
 
 const http = require('http');
 const fs = require('fs');

@@ -1,0 +1,7 @@
+# Vercel only needs public/ (static files), api/ and lib/ (the quotes function)
+local-server.js
+*.pdf
+*.xls
+*.xlsx
+*.xlsm
+my-portfolio*
