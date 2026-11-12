@@ -5,6 +5,9 @@
   "functions": {
     "api/quotes.js": {
       "maxDuration": 30
+    },
+    "api/analysis.js": {
+      "maxDuration": 60
     }
   },
   "headers": [

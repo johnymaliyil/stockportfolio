@@ -10,7 +10,10 @@ let prefs = load(LS_PREF, { sortKey: 'current', sortAsc: false, refresh: 15, the
 const LS_QUOTES = 'portfolio.quotes.v1';
 const cachedQuotes = load(LS_QUOTES, null); // last prices seen, so the app opens instantly / offline
 let quotes = cachedQuotes?.quotes || {};   // symbol -> quote
-let prevPrices = {};                      // symbol -> last price, for flash animation
+let prevPrices = {};
+const LS_ANALYSIS = 'portfolio.analysis.v1';
+let analysis = load(LS_ANALYSIS, null);      // { at, bench, items: { symbol: { signal, score, reasons, ind } } }
+let analysisLoading = false;                      // symbol -> last price, for flash animation
 let timer = null;
 let editingIndex = -1;
 
@@ -345,7 +348,7 @@ async function importFile(file) {
     save();
     const verb = same.length || ids.size > 1 ? 'Loaded' : others.length ? `Added account ${label || ''} with` : 'Loaded';
     toast(`${verb} ${list.length} holdings${skipped ? `, skipped ${skipped} invalid rows` : ''}${kept ? `, kept ${kept} buy prices` : ''}.`);
-    showView(); refresh();
+    showView(); refresh(); loadAnalysis();
   } catch (e) { toast(e.message, 6000); }
 }
 
@@ -426,6 +429,8 @@ function computeRows() {
     const display = resolved ? q.symbol.replace(/\.NS$/, '').replace(/^(.*)\.BO$/, 'BSE:$1')
       : ISIN_RE.test(h.symbol) && h.name ? h.name.replace(/\s+(Limited|Ltd\.?)$/i, '') : h.symbol;
     return {
+      an: analysis?.items?.[h.symbol] || null, sig: analysis?.items?.[h.symbol]?.signal || null,
+      sigScore: analysis?.items?.[h.symbol]?.score ?? (analysis?.items?.[h.symbol] ? -99 : null),
       i, ...h, q, live, price, invested, current, display, key: resolved ? display : h.symbol, name: resolved ? q.name || h.name : h.name || q.name, acctTag: multi ? h.accountLabel || 'Other' : '',
       changePct: live ? q.changePct : null, dayPnl: live && q.change != null ? q.change * h.qty : null,
       pnl: current != null && invested != null ? current - invested : null,
@@ -489,10 +494,13 @@ function render() {
   $('allocBar').innerHTML = segs.map((s) => `<span style="width:${s.w}%;background:${s.c}" title="${esc(s.label)} ${s.w.toFixed(1)}%"></span>`).join('');
   $('allocLegend').innerHTML = segs.map((s) => `<span><i style="background:${s.c}"></i>${esc(s.label)} <span class="muted">${s.w.toFixed(1)}%</span></span>`).join('');
 
+  renderAnalysis(rows);
+
   // table
   const f = norm($('search').value);
   const k = prefs.sortKey, dir = prefs.sortAsc ? 1 : -1;
-  const view = rows.filter((r) => !f || norm(r.symbol + r.display + (r.name || '')).includes(f)).sort((a, b) => {
+  const sf = prefs.sigFilter;
+  const view = rows.filter((r) => (!f || norm(r.symbol + r.display + (r.name || '')).includes(f)) && (!sf || sigGroup(r.sig) === sf)).sort((a, b) => {
     const x = k === 'symbol' ? a.display : a[k], y = k === 'symbol' ? b.display : b[k];
     if (typeof x === 'string') return x.localeCompare(y) * dir;
     return ((x ?? -Infinity) - (y ?? -Infinity)) * dir;
@@ -518,6 +526,7 @@ function render() {
       <td class="${cls(r.pnl)}">${signed(r.pnl)}</td>
       <td class="${cls(r.pnl)}">${pct(r.pnlPct)}</td>
       <td>${r.weight.toFixed(1)}%<span class="wbar"><b style="width:${(r.weight / maxW) * 100}%"></b></span></td>
+      <td>${sigBadge(r)}</td>
       <td><button class="btn icon" data-edit="${r.i}" title="Edit">✎</button> <button class="btn icon" data-del="${r.i}" title="Remove">×</button></td>
     </tr>`;
   }).join('');
@@ -529,7 +538,7 @@ function render() {
     const stale = r.price != null && !r.live ? ' <span class="muted small">(stmt)</span>' : '';
     const cost = `<label class="costin"><span class="muted">Buy ₹</span>${avgInput(r)}${r.invested != null ? `<span class="muted small">Inv ${fmt(r.invested, inr0)}</span>` : ''}</label>`;
     return `<div class="hcard" data-card="${r.i}">
-      <div class="r1"><div><div class="sym">${esc(r.display)}</div><div class="nm">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div></div>
+      <div class="r1"><div><div class="sym">${esc(r.display)} ${sigBadge(r)}</div><div class="nm">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div></div>
         <div class="val">${fmt(r.current)}</div></div>
       <div class="r2"><span class="muted">${num.format(r.qty)} × <b class="${flash}" style="color:var(--text)">${fmt(r.price)}</b>${stale}</span>
         <span class="${cls(r.changePct)}">${r.dayPnl != null ? signed(r.dayPnl, inr0) + ' ' : ''}<span class="chg ${cls(r.changePct)}">${pct(r.changePct)}</span></span></div>
@@ -537,12 +546,115 @@ function render() {
       ${r.q.error && !r.live ? `<div class="err">⚠ ${esc(r.q.error)}</div>` : ''}
     </div>`;
   }).join('');
-  $('sortSel').value = ['current', 'changePct', 'pnl', 'pnlPct', 'symbol'].includes(k) ? k : 'current';
+  $('sortSel').value = ['current', 'changePct', 'pnl', 'pnlPct', 'symbol', 'sigScore'].includes(k) ? k : 'current';
+  const chip = $('sigFilterChip');
+  chip.hidden = !sf;
+  if (sf) chip.innerHTML = `<span class="small muted">Showing</span> <button class="sig ${sf}" data-sigfilter="">${SIG[sf].icon} ${SIG[sf].label} only ✕</button> <span class="small muted">${view.length} stocks</span>`;
 
   document.querySelectorAll('#holdings th[data-k]').forEach((th) => {
     th.classList.toggle('sorted', th.dataset.k === k);
     th.classList.toggle('asc', th.dataset.k === k && prefs.sortAsc);
   });
+}
+
+// ---------- analysis ----------
+const SIG = {
+  strong: { label: 'Strong', icon: '▲', color: 'var(--strong)' },
+  neutral: { label: 'Neutral', icon: '◆', color: 'var(--neutral)' },
+  weak: { label: 'Weak', icon: '▼', color: 'var(--weak)' },
+  inactive: { label: 'Not trading', icon: '⏸', color: 'var(--inactive)' },
+};
+const sigGroup = (s) => (s === 'nodata' ? 'inactive' : s);
+function sigBadge(r) {
+  if (!r.sig) return analysisLoading || !analysis ? '<span class="sig pending">…</span>' : '';
+  const g = SIG[sigGroup(r.sig)];
+  const title = r.an?.score != null ? `Score ${r.an.score > 0 ? '+' : ''}${r.an.score} — tap for reasons` : 'Tap for details';
+  return `<button class="sig ${sigGroup(r.sig)}" data-sig="${r.i}" title="${title}">${g.icon} ${g.label}</button>`;
+}
+
+async function loadAnalysis(force = false) {
+  if (!holdings.length || analysisLoading) return;
+  const syms = [...new Set(holdings.map((h) => h.symbol))];
+  const fresh = analysis && Date.now() - analysis.at < 4 * 3600e3 && syms.every((s) => analysis.items?.[s]);
+  if (fresh && !force) return renderAnalysis();
+  analysisLoading = true; renderAnalysis();
+  try {
+    const res = await fetch('/api/analysis?symbols=' + encodeURIComponent(syms.join(',')));
+    if (!res.ok) throw new Error('Analysis server error ' + res.status);
+    const data = await res.json();
+    analysis = { at: data.at, bench: data.bench, items: data.items, mock: data.mock };
+    try { localStorage.setItem(LS_ANALYSIS, JSON.stringify(analysis)); } catch {}
+  } catch (e) {
+    console.error(e);
+    if (!analysis) $('anaBody').textContent = 'Analysis is unavailable right now (' + e.message + '). It will retry later.';
+    analysisLoading = false; return;
+  }
+  analysisLoading = false;
+  render();
+}
+
+function renderAnalysis(rows = computeRows()) {
+  const body = $('anaBody');
+  $('anaUpdated').textContent = analysisLoading ? 'Updating…' : analysis ? 'Updated ' + new Date(analysis.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  if (!analysis) { body.textContent = analysisLoading ? 'Analysing your holdings — fetching a year of prices for each stock…' : ''; return; }
+  body.classList.remove('muted', 'small');
+
+  // Market
+  const b = analysis.bench || {};
+  const trend = { up: ['up', 'Uptrend', 'above its 200-day average'], mixed: ['', 'Mixed', 'above its 200-day average, but the 50-day is below the 200-day'], down: ['down', 'Downtrend', 'below its 200-day average'] }[b.trend];
+  const mkt = b.last ? `<div class="anamkt"><b>Market (${esc(b.name)})</b> <span>${num.format(b.last)}</span>
+    ${trend ? `<span class="${trend[0]}">● ${trend[1]}</span> <span class="muted small">${trend[2]}</span>` : ''}
+    <span class="small">1M <span class="${cls(b.ret1m)}">${pct(b.ret1m)}</span> · 3M <span class="${cls(b.ret3m)}">${pct(b.ret3m)}</span> · 1Y <span class="${cls(b.ret1y)}">${pct(b.ret1y)}</span></span></div>`
+    : `<div class="anamkt muted small">Market data unavailable${b.error ? ': ' + esc(b.error) : ''}</div>`;
+
+  // Distribution by value
+  const total = rows.reduce((a, r) => a + (r.current ?? r.invested ?? 0), 0) || 1;
+  const groups = {};
+  for (const r of rows) {
+    if (!r.sig) continue;
+    const g = sigGroup(r.sig);
+    groups[g] = groups[g] || { n: 0, v: 0 };
+    groups[g].n++; groups[g].v += r.current ?? r.invested ?? 0;
+  }
+  const order = ['strong', 'neutral', 'weak', 'inactive'].filter((g) => groups[g]);
+  const bar = `<div class="anabar">${order.map((g) => `<span style="width:${(groups[g].v / total) * 100}%;background:${SIG[g].color}" title="${SIG[g].label}: ${((groups[g].v / total) * 100).toFixed(1)}% of value"></span>`).join('')}</div>`;
+  const legend = `<div class="analegend">${order.map((g) => `<button class="sig ${g}${prefs.sigFilter === g ? ' on' : ''}" data-sigfilter="${g}" title="Show only these">${SIG[g].icon} ${groups[g].n} ${SIG[g].label} · ${((groups[g].v / total) * 100).toFixed(0)}% of value</button>`).join('')}</div>`;
+
+  // Needs attention: weak/not-trading holdings that matter, concentration, deep losses still falling
+  const att = [];
+  for (const r of rows) {
+    const val = r.current ?? r.invested ?? 0;
+    if (r.weight >= 15) att.push({ r, w: r.weight + 100, why: `${r.weight.toFixed(0)}% of the portfolio in one stock` });
+    else if (r.sig === 'weak' && r.pnlPct != null && r.pnlPct < -25) att.push({ r, w: r.weight + 50, why: `Weak trend, ${pct(r.pnlPct)} vs your buy price` });
+    else if (r.sig === 'weak' && r.weight >= 2) att.push({ r, w: r.weight + 20, why: `Weak trend, ${r.weight.toFixed(1)}% of portfolio` });
+    else if (sigGroup(r.sig) === 'inactive' && val > 0) att.push({ r, w: r.weight, why: `Not trading — ${fmt(val, inr0)} at the last price` });
+  }
+  att.sort((a, b) => b.w - a.w);
+  const strong = rows.filter((r) => r.sig === 'strong').sort((a, b) => b.sigScore - a.sigScore || b.weight - a.weight);
+  const li = (r, why) => `<li data-sig="${r.i}"><span>${sigBadge(r)} <b>${esc(r.display)}</b>${r.acctTag ? ` <span class="acct">${esc(r.acctTag)}</span>` : ''}</span><span class="why">${why}</span></li>`;
+  const cols = `<div class="anacols">
+    <div><h3>⚠ Needs attention</h3>${att.length ? `<ul>${att.slice(0, 8).map((a) => li(a.r, a.why)).join('')}</ul>` : '<p class="muted small">Nothing stands out.</p>'}</div>
+    <div><h3>✓ Strongest trends</h3>${strong.length ? `<ul>${strong.slice(0, 8).map((r) => li(r, `score +${r.sigScore}${r.an?.ind?.ret1y != null ? ` · 1Y ${pct(r.an.ind.ret1y)}` : ''}`)).join('')}</ul>` : '<p class="muted small">None right now.</p>'}</div>
+  </div>`;
+  body.innerHTML = mkt + bar + legend + cols + (analysis.mock ? '<p class="small warn">Demo mode: these signals use simulated prices.</p>' : '');
+}
+
+function openSignal(i) {
+  const r = computeRows().find((x) => x.i === i) || null;
+  if (!r || !r.an) return;
+  const g = SIG[sigGroup(r.sig)], d = r.an.ind || {};
+  const kv = (k, v) => `<div><span>${k}</span>${v}</div>`;
+  $('sigBody').innerHTML = `<h3>${esc(r.display)} <span class="sig ${sigGroup(r.sig)}">${g.icon} ${g.label}${r.an.score != null ? ` · ${r.an.score > 0 ? '+' : ''}${r.an.score}` : ''}</span></h3>
+    <div class="muted small">${esc(r.name || '')}${r.acctTag ? ' · ' + esc(r.acctTag) : ''}</div>
+    <ul>${(r.an.reasons || []).map((x) => `<li><b class="${x.pts > 0 ? 'up' : x.pts < 0 ? 'down' : 'muted'}">${x.pts > 0 ? '+' + x.pts : x.pts < 0 ? x.pts : '•'}</b><span>${esc(x.text)}</span></li>`).join('')}</ul>
+    ${d.last ? `<div class="kv">
+      ${kv('Price', fmt(d.last))}${kv('50-day avg', fmt(d.sma50))}${kv('200-day avg', fmt(d.sma200))}
+      ${kv('1 month', `<span class="${cls(d.ret1m)}">${pct(d.ret1m)}</span>`)}${kv('3 months', `<span class="${cls(d.ret3m)}">${pct(d.ret3m)}</span>`)}${kv('1 year', `<span class="${cls(d.ret1y)}">${pct(d.ret1y)}</span>`)}
+      ${kv('52-week range', `${fmt(d.low52, inr0)} – ${fmt(d.high52, inr0)}`)}${kv('RSI (14)', d.rsi14 != null ? d.rsi14.toFixed(0) : '—')}${kv('Traded / day', d.avgValue != null ? (d.avgValue >= 1e7 ? '₹' + (d.avgValue / 1e7).toFixed(1) + ' Cr' : '₹' + (d.avgValue / 1e5).toFixed(1) + ' L') : '—')}
+    </div>` : ''}
+    <div class="kv">${kv('Your buy price', fmt(r.avg))}${kv('Your P&L', `<span class="${cls(r.pnl)}">${signed(r.pnl, inr0)} (${pct(r.pnlPct)})</span>`)}${kv('Portfolio weight', r.weight.toFixed(1) + '%')}</div>
+    <p class="small muted">Technical signal from price history only — not a recommendation to buy or sell.</p>`;
+  $('sigDlg').showModal();
 }
 
 function showView() {
@@ -580,7 +692,7 @@ $('editDlg').addEventListener('close', () => {
     if (ex) mergeInto(ex, item);
     else holdings.push({ ...item, account: acct, accountLabel: label });
   }
-  save(); showView(); refresh();
+  save(); showView(); refresh(); loadAnalysis();
 });
 
 // ---------- events ----------
@@ -730,6 +842,16 @@ for (const box of [$('holdings'), $('cards')]) {
   });
 }
 
+// signal badges / analysis lists / filter chips
+document.addEventListener('click', (e) => {
+  const fb = e.target.closest('[data-sigfilter]');
+  if (fb) { prefs.sigFilter = fb.dataset.sigfilter && prefs.sigFilter !== fb.dataset.sigfilter ? fb.dataset.sigfilter : null; save(); render(); return; }
+  const sb = e.target.closest('[data-sig]');
+  if (sb) { e.stopPropagation(); openSignal(Number(sb.dataset.sig)); }
+}, true);
+$('anaRefresh').addEventListener('click', () => loadAnalysis(true));
+$('sigDlg').addEventListener('click', (e) => { if (e.target === $('sigDlg')) $('sigDlg').close(); });
+
 $('cards').addEventListener('click', (e) => {
   if (e.target.closest('.costin')) return; // typing a buy price, not opening the editor
   const c = e.target.closest('[data-card]');
@@ -795,3 +917,5 @@ updateMarketStatus();
 showView();
 refresh();
 schedule();
+loadAnalysis();
+setInterval(() => { if (!document.hidden) loadAnalysis(); }, 30 * 60e3); // daily data: re-check every 30 min, refetches after 4h

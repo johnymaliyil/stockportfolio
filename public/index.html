@@ -76,6 +76,27 @@
       </div>
 
       <div id="costBanner" class="card banner" hidden></div>
+
+      <div id="analysisCard" class="card">
+        <div class="cardhead">
+          <h2>Analysis</h2>
+          <span class="row"><span id="anaUpdated" class="muted small"></span><button id="anaRefresh" class="btn icon" title="Re-run analysis">↻</button></span>
+        </div>
+        <div id="anaBody" class="muted small">Analysing your holdings…</div>
+        <details class="howto">
+          <summary class="small muted">How are stocks marked?</summary>
+          <div class="small muted">
+            Each stock gets points from its last year of prices: <b>+2/−2</b> above/below its 200-day average,
+            <b>+1/−1</b> above/below its 50-day average, <b>+1/−1</b> 50-day above/below the 200-day,
+            <b>+1/−1</b> 3-month return above +5% / below −10%, <b>+1/−1</b> beat/lagged the NIFTY 50 by 5%+ over the year,
+            <b>+1/−1</b> within 10% of / more than 40% below its 52-week high, and <b>−1</b> each for penny stocks (under ₹10)
+            and low liquidity (under ₹1 Cr traded a day). <b>+3 or more = Strong</b>, <b>−3 or less = Weak</b>, otherwise Neutral.
+            Tap a stock's badge to see its reasons.
+          </div>
+        </details>
+        <p class="disclaimer small muted">Automatic technical signals from price history only. They don't consider company results, valuation, news
+          or your goals, and are not investment advice. Check with a SEBI-registered adviser before buying or selling.</p>
+      </div>
       <div id="installBanner" class="card banner info" hidden></div>
 
       <div class="card">
@@ -98,6 +119,7 @@
               <option value="pnl">P&amp;L</option>
               <option value="pnlPct">P&amp;L %</option>
               <option value="symbol">Name</option>
+              <option value="sigScore">Signal</option>
             </select>
             <label class="btn primary" title="Upload a statement or holdings file (PDF, Excel, CSV — any format)">⬆ Upload<input id="fileInput2" type="file" hidden /></label>
             <details class="menu">
@@ -118,6 +140,7 @@
             </details>
           </div>
         </div>
+        <div id="sigFilterChip" class="row" hidden></div>
         <div id="cards" class="cards"></div>
         <div class="tablewrap hide-sm">
           <table id="holdings">
@@ -134,6 +157,7 @@
                 <th data-k="pnl">P&amp;L</th>
                 <th data-k="pnlPct">P&amp;L %</th>
                 <th data-k="weight">Weight</th>
+                <th data-k="sigScore">Signal</th>
                 <th class="nosort"></th>
               </tr>
             </thead>
@@ -143,6 +167,13 @@
       </div>
     </section>
   </main>
+
+  <dialog id="sigDlg">
+    <form method="dialog">
+      <div id="sigBody"></div>
+      <div class="row end"><button class="btn primary" value="close">Close</button></div>
+    </form>
+  </dialog>
 
   <dialog id="editDlg">
     <form method="dialog" id="editForm">

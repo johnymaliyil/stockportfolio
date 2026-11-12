@@ -110,6 +110,26 @@ symbols/ISINs are, so their prices can be fetched.
 - Auto-refresh every 5s / 15s / 30s / 1m (paused while the tab is hidden), and price-change flashes
 - Add, edit and remove holdings by hand; export to CSV; light and dark themes
 
+## Analysis (Strong / Neutral / Weak)
+
+The **Analysis** card checks every holding against its last year of daily prices, with the NIFTY 50 as the market
+benchmark. It scores trend (50/200-day averages), momentum (3-month return, 1-year return vs the NIFTY), position in the
+52-week range, and risk (penny stock, low liquidity). The total gives each stock a badge:
+
+| Badge | Meaning |
+|---|---|
+| ▲ Strong (score ≥ +3) | Trending up and holding up better than the market |
+| ◆ Neutral | Mixed signals |
+| ▼ Weak (score ≤ −3) | Trending down, lagging the market, or risky |
+| ⏸ Not trading | No trades for 10+ days (suspended, delisted or unlisted) |
+
+Tap any badge to see the exact reasons and numbers. Tap a group in the card to filter the holdings list, or sort by **Signal**.
+*Needs attention* lists weak or untradeable holdings that matter: large positions, big losses still falling, or one stock
+over 15% of the portfolio. Daily data is fetched at most every 4 hours.
+
+These are automatic technical signals from price history only. They don't consider company results, valuation or news,
+and they are **not investment advice**.
+
 ## How prices work
 
 `lib/quotes.js` (used by `local-server.js` locally and `api/quotes.js` on Vercel) maps ISINs to NSE symbols using NSE's published equity and ETF lists (refreshed every 12 hours), proxies Yahoo Finance's chart API (`/api/quotes?symbols=RELIANCE,TCS`), caches each symbol

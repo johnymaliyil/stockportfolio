@@ -8,6 +8,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { MOCK, getQuotes } = require('./lib/quotes');
+const { analyse } = require('./lib/analysis');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -27,6 +28,12 @@ const server = http.createServer(async (req, res) => {
     const symbols = (url.searchParams.get('symbols') || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 300);
     if (!symbols.length) return sendJSON(res, 400, { error: 'Pass ?symbols=RELIANCE,TCS' });
     try { return sendJSON(res, 200, { mock: MOCK, at: Date.now(), quotes: await getQuotes(symbols) }); }
+    catch (e) { return sendJSON(res, 500, { error: e.message }); }
+  }
+  if (url.pathname === '/api/analysis') {
+    const symbols = (url.searchParams.get('symbols') || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 300);
+    if (!symbols.length) return sendJSON(res, 400, { error: 'Pass ?symbols=RELIANCE,TCS' });
+    try { return sendJSON(res, 200, { mock: MOCK, at: Date.now(), ...(await analyse(symbols)) }); }
     catch (e) { return sendJSON(res, 500, { error: e.message }); }
   }
   if (url.pathname === '/api/health') return sendJSON(res, 200, { ok: true, mock: MOCK });

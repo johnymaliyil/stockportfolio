@@ -1,6 +1,6 @@
 // Service worker: makes the app installable and lets it open offline (showing the last prices it saw).
 // Live quotes (/api/*) always go to the network. Bump VERSION when shipping changes to the app shell.
-const VERSION = 'pf-v5';
+const VERSION = 'pf-v6';
 const SHELL = ['./', 'index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'sample-portfolio.csv',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/icon.svg'];
 const CDN = 'https://cdnjs.cloudflare.com/';

@@ -200,3 +200,36 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .hcard .err { font-size: 11px; }
 .costin { display: inline-flex; align-items: center; gap: 6px; }
 .costin .avgin { width: 110px; padding: 4px 8px; }
+
+/* ---------- analysis ---------- */
+:root { --strong: var(--up); --weak: var(--down); --neutral: #a16207; --inactive: #6b7280; }
+.sig { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid currentColor; background: none; cursor: pointer; font-family: inherit; white-space: nowrap; line-height: 1.5; }
+.sig.strong { color: var(--strong); background: var(--up-bg); }
+.sig.weak { color: var(--weak); background: var(--down-bg); }
+.sig.neutral { color: var(--neutral); }
+.sig.inactive, .sig.nodata { color: var(--inactive); }
+.sig.pending { color: var(--muted); border-style: dashed; cursor: default; }
+.anamkt { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; margin-bottom: 10px; }
+.anabar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; gap: 2px; margin: 6px 0; }
+.anabar span { display: block; height: 100%; min-width: 3px; }
+.analegend { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.analegend .sig { font-size: 12px; padding: 3px 10px; }
+.analegend .sig.on { outline: 2px solid currentColor; outline-offset: 1px; }
+.anacols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; }
+.anacols h3 { font-size: 13px; margin: 0 0 6px; }
+.anacols ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.anacols li { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; font-size: 13px; cursor: pointer; }
+.anacols li .why { color: var(--muted); font-size: 12px; text-align: right; }
+.howto { margin-top: 10px; }
+.howto summary { cursor: pointer; }
+.howto div { margin-top: 6px; line-height: 1.5; }
+.disclaimer { margin: 8px 0 0; }
+#sigDlg { width: min(520px, calc(100vw - 32px)); }
+#sigDlg ul { padding-left: 0; list-style: none; display: grid; gap: 6px; margin: 10px 0; }
+#sigDlg li { display: flex; gap: 8px; font-size: 13px; }
+#sigDlg li b { min-width: 26px; text-align: right; font-variant-numeric: tabular-nums; }
+.kv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 12px; font-size: 12px; margin: 8px 0; }
+.kv div span { display: block; color: var(--muted); font-size: 11px; }
+#sigFilterChip { margin: 0 0 10px; }
+@media (max-width: 700px) { .anacols { grid-template-columns: 1fr; } .kv { grid-template-columns: repeat(2, 1fr); } }
