@@ -13,7 +13,10 @@ let quotes = cachedQuotes?.quotes || {};   // symbol -> quote
 let prevPrices = {};
 const LS_ANALYSIS = 'portfolio.analysis.v1';
 let analysis = load(LS_ANALYSIS, null);      // { at, bench, items: { symbol: { signal, score, reasons, ind } } }
-let analysisLoading = false;                      // symbol -> last price, for flash animation
+let analysisLoading = false;
+const LS_FUND = 'portfolio.fund.v1';
+let fund = load(LS_FUND, null);              // { at, items: { symbol: { sector, pe, roe, … } } }
+let fundLoading = false;                      // symbol -> last price, for flash animation
 let timer = null;
 let editingIndex = -1;
 
@@ -348,7 +351,7 @@ async function importFile(file) {
     save();
     const verb = same.length || ids.size > 1 ? 'Loaded' : others.length ? `Added account ${label || ''} with` : 'Loaded';
     toast(`${verb} ${list.length} holdings${skipped ? `, skipped ${skipped} invalid rows` : ''}${kept ? `, kept ${kept} buy prices` : ''}.`);
-    showView(); refresh(); loadAnalysis();
+    showView(); refresh(); loadAnalysis(); loadFundamentals();
   } catch (e) { toast(e.message, 6000); }
 }
 
@@ -429,6 +432,7 @@ function computeRows() {
     const display = resolved ? q.symbol.replace(/\.NS$/, '').replace(/^(.*)\.BO$/, 'BSE:$1')
       : ISIN_RE.test(h.symbol) && h.name ? h.name.replace(/\s+(Limited|Ltd\.?)$/i, '') : h.symbol;
     return {
+      fd: fund?.items?.[h.symbol] || null, ...fundFields(fund?.items?.[h.symbol]),
       an: analysis?.items?.[h.symbol] || null, sig: analysis?.items?.[h.symbol]?.signal || null,
       sigScore: analysis?.items?.[h.symbol]?.score ?? (analysis?.items?.[h.symbol] ? -99 : null),
       i, ...h, q, live, price, invested, current, display, key: resolved ? display : h.symbol, name: resolved ? q.name || h.name : h.name || q.name, acctTag: multi ? h.accountLabel || 'Other' : '',
@@ -444,7 +448,7 @@ function computeRows() {
 
 // Editable buy-price box used in the table and on the phone cards.
 const avgInput = (r) => `<input class="avgin${r.avg == null ? ' empty' : ''}" data-avg="${r.i}" type="number" inputmode="decimal" step="any" min="0"
-  value="${r.avg ?? ''}" placeholder="Add" title="Average buy price — type to change" aria-label="Average buy price for ${esc(r.display)}">`;
+  value="${r.avg != null ? Number(r.avg.toFixed(2)) : ''}" placeholder="Add" title="Average buy price — type to change" aria-label="Average buy price for ${esc(r.display)}">`;
 
 function sparkSVG(pts, up) {
   if (!pts || pts.length < 2) return '';
@@ -515,7 +519,7 @@ function render() {
     const avgCell = `<td>${avgInput(r)}</td>`;
     const stale = r.price != null && !r.live ? `<span class="stale">statement${r.refDate ? ' ' + esc(r.refDate) : ''}</span>` : '';
     return `<tr>
-      <td class="l"><div class="sym">${esc(r.display)}</div>${sub}</td>
+      <td class="l"><div class="sym">${esc(r.display)} <button class="infobtn" data-info="${r.i}" title="Company details">ⓘ</button></div>${sub}</td>
       <td>${num.format(r.qty)}</td>
       ${avgCell}
       <td class="${flash}" title="${r.q.dayLow != null ? `Day ${fmt(r.q.dayLow)} – ${fmt(r.q.dayHigh)}\n52w ${fmt(r.q.low52)} – ${fmt(r.q.high52)}` : ''}"><b>${fmt(r.price)}</b>${stale}</td>
@@ -538,15 +542,20 @@ function render() {
     const stale = r.price != null && !r.live ? ' <span class="muted small">(stmt)</span>' : '';
     const cost = `<label class="costin"><span class="muted">Buy ₹</span>${avgInput(r)}${r.invested != null ? `<span class="muted small">Inv ${fmt(r.invested, inr0)}</span>` : ''}</label>`;
     return `<div class="hcard" data-card="${r.i}">
-      <div class="r1"><div><div class="sym">${esc(r.display)} ${sigBadge(r)}</div><div class="nm">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div></div>
+      <div class="r1"><div><div class="sym">${esc(r.display)} ${sigBadge(r)} <button class="infobtn" data-info="${r.i}" title="Company details">ⓘ</button></div><div class="nm">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div></div>
         <div class="val">${fmt(r.current)}</div></div>
       <div class="r2"><span class="muted">${num.format(r.qty)} × <b class="${flash}" style="color:var(--text)">${fmt(r.price)}</b>${stale}</span>
         <span class="${cls(r.changePct)}">${r.dayPnl != null ? signed(r.dayPnl, inr0) + ' ' : ''}<span class="chg ${cls(r.changePct)}">${pct(r.changePct)}</span></span></div>
       <div class="r3">${cost}<span class="${cls(r.pnl)}">${r.pnl != null ? `${signed(r.pnl, inr0)} (${pct(r.pnlPct)})` : ''}</span></div>
+      ${prefs.view === 'fund' ? fundLine(r) : ''}
       ${r.q.error && !r.live ? `<div class="err">⚠ ${esc(r.q.error)}</div>` : ''}
     </div>`;
   }).join('');
-  $('sortSel').value = ['current', 'changePct', 'pnl', 'pnlPct', 'symbol', 'sigScore'].includes(k) ? k : 'current';
+  renderFundTable(view);
+  const fv = prefs.view === 'fund';
+  $('viewPrices').classList.toggle('on', !fv); $('viewFund').classList.toggle('on', fv);
+  $('pricesWrap').hidden = fv; $('fundWrap').hidden = !fv;
+  $('sortSel').value = ['current', 'changePct', 'pnl', 'pnlPct', 'symbol', 'sigScore', 'fPe', 'fRoe', 'fDe', 'fDy'].includes(k) ? k : 'current';
   const chip = $('sigFilterChip');
   chip.hidden = !sf;
   if (sf) chip.innerHTML = `<span class="small muted">Showing</span> <button class="sig ${sf}" data-sigfilter="">${SIG[sf].icon} ${SIG[sf].label} only ✕</button> <span class="small muted">${view.length} stocks</span>`;
@@ -596,7 +605,7 @@ async function loadAnalysis(force = false) {
 function renderAnalysis(rows = computeRows()) {
   const body = $('anaBody');
   $('anaUpdated').textContent = analysisLoading ? 'Updating…' : analysis ? 'Updated ' + new Date(analysis.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
-  if (!analysis) { body.textContent = analysisLoading ? 'Analysing your holdings — fetching a year of prices for each stock…' : ''; return; }
+  if (!analysis) { body.innerHTML = portfolioFundamentals(rows) + `<p class="muted small">${analysisLoading ? 'Analysing price trends — fetching a year of prices for each stock…' : ''}</p>`; return; }
   body.classList.remove('muted', 'small');
 
   // Market
@@ -636,24 +645,143 @@ function renderAnalysis(rows = computeRows()) {
     <div><h3>⚠ Needs attention</h3>${att.length ? `<ul>${att.slice(0, 8).map((a) => li(a.r, a.why)).join('')}</ul>` : '<p class="muted small">Nothing stands out.</p>'}</div>
     <div><h3>✓ Strongest trends</h3>${strong.length ? `<ul>${strong.slice(0, 8).map((r) => li(r, `score +${r.sigScore}${r.an?.ind?.ret1y != null ? ` · 1Y ${pct(r.an.ind.ret1y)}` : ''}`)).join('')}</ul>` : '<p class="muted small">None right now.</p>'}</div>
   </div>`;
-  body.innerHTML = mkt + bar + legend + cols + (analysis.mock ? '<p class="small warn">Demo mode: these signals use simulated prices.</p>' : '');
+  body.innerHTML = mkt + portfolioFundamentals(rows) + bar + legend + cols + (analysis.mock ? '<p class="small warn">Demo mode: these signals use simulated prices.</p>' : '');
 }
 
-function openSignal(i) {
-  const r = computeRows().find((x) => x.i === i) || null;
-  if (!r || !r.an) return;
-  const g = SIG[sigGroup(r.sig)], d = r.an.ind || {};
-  const kv = (k, v) => `<div><span>${k}</span>${v}</div>`;
-  $('sigBody').innerHTML = `<h3>${esc(r.display)} <span class="sig ${sigGroup(r.sig)}">${g.icon} ${g.label}${r.an.score != null ? ` · ${r.an.score > 0 ? '+' : ''}${r.an.score}` : ''}</span></h3>
-    <div class="muted small">${esc(r.name || '')}${r.acctTag ? ' · ' + esc(r.acctTag) : ''}</div>
+// ---------- fundamentals ----------
+const FIN_SECTOR = /financial/i;
+function fundFields(f) {
+  if (!f || f.error) return { sector: null, fMcap: null, fPe: null, fPb: null, fRoe: null, fDe: null, fPm: null, fRg: null, fEg: null, fDy: null, fProm: null };
+  return { sector: f.sector || (f.type === 'ETF' ? 'ETF' : null), fMcap: f.marketCap, fPe: f.pe ?? (f.eps < 0 ? -1 : null), fPb: f.pb, fRoe: f.roe,
+    fDe: f.debtToEquity, fPm: f.profitMargin, fRg: f.revenueGrowth, fEg: f.earningsGrowth, fDy: f.dividendYield ?? 0, fProm: f.promoters };
+}
+// Rule-of-thumb colouring (facts, not verdicts)
+function fcls(k, v, f) {
+  if (v == null || !isFinite(v)) return '';
+  switch (k) {
+    case 'pe': return v < 0 ? 'down' : '';
+    case 'roe': return v >= 15 ? 'up' : v < 8 ? 'down' : '';
+    case 'de': return FIN_SECTOR.test(f?.sector || '') ? '' : v <= 0.5 ? 'up' : v > 1.5 ? 'down' : '';
+    case 'pm': return v < 0 ? 'down' : v >= 15 ? 'up' : '';
+    case 'gr': return v >= 10 ? 'up' : v < 0 ? 'down' : '';
+    case 'dy': return v >= 2 ? 'up' : '';
+    default: return '';
+  }
+}
+const nf1 = (v, suf = '') => (v == null || !isFinite(v) ? '—' : `${v.toFixed(Math.abs(v) >= 100 ? 0 : 1)}${suf}`);
+const crores = (v) => (v == null ? '—' : v >= 1e12 ? `₹${num.format(Math.round(v / 1e7))} Cr` : `₹${(v / 1e7).toLocaleString('en-IN', { maximumFractionDigits: v >= 1e10 ? 0 : 1 })} Cr`);
+// Rough SEBI-style bands (the official lists rank by size: top 100 large, next 150 mid).
+const capBand = (v) => (v == null ? '' : v >= 1e12 ? 'Large cap' : v >= 3e11 ? 'Mid cap' : v >= 5e10 ? 'Small cap' : 'Micro cap');
+const peText = (f) => (f?.pe != null ? nf1(f.pe) : f?.eps != null && f.eps < 0 ? 'Loss' : '—');
+
+function fundLine(r) {
+  const f = r.fd;
+  if (!f) return fundLoading ? '<div class="fund muted">Loading fundamentals…</div>' : '';
+  if (f.error) return `<div class="fund muted">No company data (${esc(f.error)})</div>`;
+  const it = (k, v, c) => `<span>${k} <b class="${c}">${v}</b></span>`;
+  return `<div class="fund"><span class="sec">${esc([f.sector, capBand(f.marketCap)].filter(Boolean).join(' · ') || f.type || '')}</span>
+    ${it('P/E', peText(f), fcls('pe', f.pe ?? (f.eps < 0 ? -1 : null)))}${it('P/B', nf1(f.pb), '')}${it('ROE', nf1(f.roe, '%'), fcls('roe', f.roe))}
+    ${it('D/E', nf1(f.debtToEquity), fcls('de', f.debtToEquity, f))}${it('Margin', nf1(f.profitMargin, '%'), fcls('pm', f.profitMargin))}
+    ${it('Sales gr.', nf1(f.revenueGrowth, '%'), fcls('gr', f.revenueGrowth))}${it('Div', nf1(f.dividendYield ?? 0, '%'), fcls('dy', f.dividendYield))}</div>`;
+}
+
+function renderFundTable(view) {
+  const td = (v, c = '') => `<td class="${c}">${v}</td>`;
+  $('fundTable').querySelector('tbody').innerHTML = view.map((r) => {
+    const f = r.fd;
+    const name = `<td class="l"><div class="sym">${esc(r.display)} <button class="infobtn" data-info="${r.i}" title="Company details">ⓘ</button></div><div class="nm">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div></td>`;
+    if (!f || f.error) return `<tr>${name}<td class="l muted small" colspan="11">${f?.error ? 'No company data — ' + esc(f.error) : fundLoading ? 'Loading…' : '—'}</td></tr>`;
+    return `<tr>${name}
+      <td class="l"><div class="sec" title="${esc(f.industry || '')}">${esc(f.sector || f.type || '—')}</div><div class="nm">${esc(f.industry || '')}</div></td>
+      <td>${crores(f.marketCap)}<span class="cap">${capBand(f.marketCap)}</span></td>
+      ${td(peText(f), fcls('pe', r.fPe))}${td(nf1(f.pb))}${td(nf1(f.roe, '%'), fcls('roe', f.roe))}${td(nf1(f.debtToEquity), fcls('de', f.debtToEquity, f))}
+      ${td(nf1(f.profitMargin, '%'), fcls('pm', f.profitMargin))}${td(nf1(f.revenueGrowth, '%'), fcls('gr', f.revenueGrowth))}${td(nf1(f.earningsGrowth, '%'), fcls('gr', f.earningsGrowth))}
+      ${td(nf1(f.dividendYield ?? 0, '%'), fcls('dy', f.dividendYield))}${td(nf1(f.promoters, '%'))}</tr>`;
+  }).join('');
+  document.querySelectorAll('#fundTable th[data-k]').forEach((th) => {
+    th.classList.toggle('sorted', th.dataset.k === prefs.sortKey);
+    th.classList.toggle('asc', th.dataset.k === prefs.sortKey && prefs.sortAsc);
+  });
+}
+
+async function loadFundamentals(force = false) {
+  if (!holdings.length || fundLoading) return;
+  const syms = [...new Set(holdings.map((h) => h.symbol))];
+  const fresh = fund && Date.now() - fund.at < 24 * 3600e3 && syms.every((s) => fund.items?.[s]);
+  if (fresh && !force) return;
+  fundLoading = true; render();
+  try {
+    const res = await fetch('/api/fundamentals?symbols=' + encodeURIComponent(syms.join(',')));
+    if (!res.ok) throw new Error('Fundamentals server error ' + res.status);
+    const data = await res.json();
+    fund = { at: data.at, items: data.items, mock: data.mock };
+    try { localStorage.setItem(LS_FUND, JSON.stringify(fund)); } catch {}
+  } catch (e) { console.error(e); toast('Fundamentals unavailable right now: ' + e.message, 5000); }
+  fundLoading = false; render();
+}
+
+// Portfolio-level fundamentals for the Analysis card: sector mix, value-weighted P/E, dividend yield.
+function portfolioFundamentals(rows) {
+  const withF = rows.filter((r) => r.fd && !r.fd.error);
+  if (!withF.length) return fundLoading ? '<div class="anasec muted small">Loading company fundamentals…</div>' : '';
+  const val = (r) => r.current ?? r.invested ?? 0;
+  const total = rows.reduce((a, r) => a + val(r), 0) || 1;
+  const sec = new Map();
+  for (const r of rows) { const k = r.fd && !r.fd.error ? r.fd.sector || (r.fd.type === 'ETF' ? 'ETF / Index' : 'Other') : 'Unknown'; sec.set(k, (sec.get(k) || 0) + val(r)); }
+  const secs = [...sec].sort((a, b) => b[1] - a[1]);
+  const COLORS = ['#0f766e', '#2563eb', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d', '#dc2626', '#4f46e5', '#9ca3af', '#a16207', '#be123c'];
+  // Value-weighted P/E = total value ÷ total earnings attributable (profitable companies only)
+  const profitable = withF.filter((r) => r.fd.pe > 0);
+  const pv = profitable.reduce((a, r) => a + val(r), 0), earn = profitable.reduce((a, r) => a + val(r) / r.fd.pe, 0);
+  const loss = withF.filter((r) => r.fd.pe == null && r.fd.eps < 0);
+  const divInc = withF.reduce((a, r) => a + val(r) * (r.fd.dividendYield || 0) / 100, 0);
+  const roeRows = withF.filter((r) => r.fd.roe != null), roeW = roeRows.reduce((a, r) => a + val(r), 0);
+  const roe = roeW ? roeRows.reduce((a, r) => a + r.fd.roe * val(r), 0) / roeW : null;
+  return `<div class="anasec"><h3>Fundamentals of your portfolio</h3>
+    <div class="anafund">
+      <span>P/E (value-weighted) <b>${earn ? (pv / earn).toFixed(1) : '—'}</b></span>
+      <span>ROE (value-weighted) <b class="${fcls('roe', roe)}">${nf1(roe, '%')}</b></span>
+      <span>Dividend yield <b>${((divInc / total) * 100).toFixed(2)}%</b> <span class="muted small">≈ ${fmt(divInc, inr0)}/yr</span></span>
+      <span>Loss-making <b class="${loss.length ? 'down' : ''}">${loss.length}</b> <span class="muted small">of ${withF.length}</span></span>
+    </div>
+    <div class="sectorbar">${secs.map(([k, v], i) => `<span style="width:${(v / total) * 100}%;background:${COLORS[i % COLORS.length]}" title="${esc(k)} ${((v / total) * 100).toFixed(1)}%"></span>`).join('')}</div>
+    <div class="legend">${secs.map(([k, v], i) => `<span><i style="background:${COLORS[i % COLORS.length]}"></i>${esc(k)} <span class="muted">${((v / total) * 100).toFixed(1)}%</span></span>`).join('')}</div>
+  </div>`;
+}
+
+// Company details popup: fundamentals, price trend (if analysed) and your position.
+function openDetails(i) {
+  const r = computeRows().find((x) => x.i === i);
+  if (!r) return;
+  const kv = (k, v, t = '') => `<div title="${t}"><span>${k}</span>${v}</div>`;
+  const f = r.fd && !r.fd.error ? r.fd : null;
+  const g = r.sig ? SIG[sigGroup(r.sig)] : null;
+  const d = r.an?.ind || {};
+  $('sigBody').innerHTML = `<h3>${esc(r.display)} ${g ? `<span class="sig ${sigGroup(r.sig)}">${g.icon} ${g.label}${r.an.score != null ? ` · ${r.an.score > 0 ? '+' : ''}${r.an.score}` : ''}</span>` : ''}</h3>
+    <div class="muted small">${esc(r.name || '')}${r.acctTag ? ' · ' + esc(r.acctTag) : ''}${r.isin ? ' · ' + esc(r.isin) : ''}</div>
+    <h4 class="dsec">Fundamentals</h4>
+    ${f ? `<div class="muted small">${esc([f.sector, f.industry, capBand(f.marketCap)].filter(Boolean).join(' · '))}${f.employees ? ` · ${num.format(f.employees)} employees` : ''}</div>
+    ${f.about ? `<p class="about">${esc(f.about)}${f.about.length >= 600 ? '…' : ''}</p>` : ''}
+    <div class="kv">
+      ${kv('Market cap', crores(f.marketCap))}${kv('P/E', `<b class="${fcls('pe', r.fPe)}">${peText(f)}</b>`, 'Price ÷ earnings per share')}${kv('P/B', nf1(f.pb), 'Price ÷ book value per share')}
+      ${kv('EPS (12m)', f.eps != null ? fmt(f.eps) : '—')}${kv('Book value / share', f.bookValue != null ? fmt(f.bookValue) : '—')}${kv('EV / EBITDA', nf1(f.evEbitda))}
+      ${kv('ROE', `<b class="${fcls('roe', f.roe)}">${nf1(f.roe, '%')}</b>`, 'Profit ÷ shareholders\' equity')}${kv('ROA', nf1(f.roa, '%'))}${kv('Profit margin', `<b class="${fcls('pm', f.profitMargin)}">${nf1(f.profitMargin, '%')}</b>`)}
+      ${kv('Operating margin', nf1(f.operatingMargin, '%'))}${kv('Sales growth', `<b class="${fcls('gr', f.revenueGrowth)}">${nf1(f.revenueGrowth, '%')}</b>`, 'Latest quarter vs a year ago')}${kv('Profit growth', `<b class="${fcls('gr', f.earningsGrowth)}">${nf1(f.earningsGrowth, '%')}</b>`, 'Latest quarter vs a year ago')}
+      ${kv('Debt / equity', `<b class="${fcls('de', f.debtToEquity, f)}">${nf1(f.debtToEquity)}</b>`)}${kv('Total debt', crores(f.totalDebt))}${kv('Cash', crores(f.totalCash))}
+      ${kv('Current ratio', nf1(f.currentRatio))}${kv('Revenue (12m)', crores(f.revenue))}${kv('Free cash flow', crores(f.freeCashflow))}
+      ${kv('Dividend yield', `<b class="${fcls('dy', f.dividendYield)}">${nf1(f.dividendYield ?? 0, '%')}</b>`)}${kv('Payout ratio', nf1(f.payoutRatio, '%'))}${kv('Beta', nf1(f.beta))}
+      ${kv('Promoters / insiders', nf1(f.promoters, '%'))}${kv('Institutions', nf1(f.institutions, '%'))}${kv('Website', f.website ? `<a href="${esc(f.website)}" target="_blank" rel="noopener">${esc(f.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))}</a>` : '—')}
+    </div>` : `<p class="muted small">${r.fd?.error ? 'No company data: ' + esc(r.fd.error) : fundLoading ? 'Loading…' : 'Not loaded yet.'}</p>`}
+    ${r.an ? `<h4 class="dsec">Price trend</h4>
     <ul>${(r.an.reasons || []).map((x) => `<li><b class="${x.pts > 0 ? 'up' : x.pts < 0 ? 'down' : 'muted'}">${x.pts > 0 ? '+' + x.pts : x.pts < 0 ? x.pts : '•'}</b><span>${esc(x.text)}</span></li>`).join('')}</ul>
     ${d.last ? `<div class="kv">
-      ${kv('Price', fmt(d.last))}${kv('50-day avg', fmt(d.sma50))}${kv('200-day avg', fmt(d.sma200))}
       ${kv('1 month', `<span class="${cls(d.ret1m)}">${pct(d.ret1m)}</span>`)}${kv('3 months', `<span class="${cls(d.ret3m)}">${pct(d.ret3m)}</span>`)}${kv('1 year', `<span class="${cls(d.ret1y)}">${pct(d.ret1y)}</span>`)}
-      ${kv('52-week range', `${fmt(d.low52, inr0)} – ${fmt(d.high52, inr0)}`)}${kv('RSI (14)', d.rsi14 != null ? d.rsi14.toFixed(0) : '—')}${kv('Traded / day', d.avgValue != null ? (d.avgValue >= 1e7 ? '₹' + (d.avgValue / 1e7).toFixed(1) + ' Cr' : '₹' + (d.avgValue / 1e5).toFixed(1) + ' L') : '—')}
-    </div>` : ''}
-    <div class="kv">${kv('Your buy price', fmt(r.avg))}${kv('Your P&L', `<span class="${cls(r.pnl)}">${signed(r.pnl, inr0)} (${pct(r.pnlPct)})</span>`)}${kv('Portfolio weight', r.weight.toFixed(1) + '%')}</div>
-    <p class="small muted">Technical signal from price history only — not a recommendation to buy or sell.</p>`;
+      ${kv('50-day avg', fmt(d.sma50))}${kv('200-day avg', fmt(d.sma200))}${kv('52-week range', `${fmt(d.low52, inr0)} – ${fmt(d.high52, inr0)}`)}
+    </div>` : ''}` : ''}
+    <h4 class="dsec">Your holding</h4>
+    <div class="kv">${kv('Quantity', num.format(r.qty))}${kv('Buy price', fmt(r.avg))}${kv('Current value', fmt(r.current, inr0))}
+      ${kv('P&L', `<span class="${cls(r.pnl)}">${signed(r.pnl, inr0)} (${pct(r.pnlPct)})</span>`)}${kv('Portfolio weight', r.weight.toFixed(1) + '%')}</div>
+    <p class="small muted">Source: Yahoo Finance. Figures can lag the latest quarterly results. For information only.</p>`;
   $('sigDlg').showModal();
 }
 
@@ -692,7 +820,7 @@ $('editDlg').addEventListener('close', () => {
     if (ex) mergeInto(ex, item);
     else holdings.push({ ...item, account: acct, accountLabel: label });
   }
-  save(); showView(); refresh(); loadAnalysis();
+  save(); showView(); refresh(); loadAnalysis(); loadFundamentals();
 });
 
 // ---------- events ----------
@@ -822,7 +950,8 @@ function commitAvg(input) {
   if (!h) return;
   const n = v === '' ? null : toNum(v);
   if (n !== null && !(n >= 0)) return toast('Enter a valid price.');
-  if (n !== h.avg) { h.avg = n; save(); if (n != null) toast(`Buy price saved for ${h.name || h.symbol}`, 1500); }
+  // the box shows 2 decimals; don't overwrite a more precise stored price unless it was really changed
+  if (n === null ? h.avg != null : h.avg == null || Math.abs(n - h.avg) >= 0.005) { h.avg = n; save(); if (n != null) toast(`Buy price saved for ${h.name || h.symbol}`, 1500); }
   setTimeout(render);
 }
 for (const box of [$('holdings'), $('cards')]) {
@@ -847,9 +976,20 @@ document.addEventListener('click', (e) => {
   const fb = e.target.closest('[data-sigfilter]');
   if (fb) { prefs.sigFilter = fb.dataset.sigfilter && prefs.sigFilter !== fb.dataset.sigfilter ? fb.dataset.sigfilter : null; save(); render(); return; }
   const sb = e.target.closest('[data-sig]');
-  if (sb) { e.stopPropagation(); openSignal(Number(sb.dataset.sig)); }
+  if (sb) { e.stopPropagation(); openDetails(Number(sb.dataset.sig)); return; }
+  const ib = e.target.closest('[data-info]');
+  if (ib) { e.stopPropagation(); openDetails(Number(ib.dataset.info)); }
 }, true);
-$('anaRefresh').addEventListener('click', () => loadAnalysis(true));
+$('anaRefresh').addEventListener('click', () => { loadAnalysis(true); loadFundamentals(true); });
+$('viewPrices').addEventListener('click', () => { prefs.view = 'prices'; save(); render(); });
+$('viewFund').addEventListener('click', () => { prefs.view = 'fund'; save(); render(); loadFundamentals(); });
+$('fundTable').addEventListener('click', (e) => {
+  const th = e.target.closest('th[data-k]');
+  if (!th) return;
+  if (prefs.sortKey === th.dataset.k) prefs.sortAsc = !prefs.sortAsc;
+  else { prefs.sortKey = th.dataset.k; prefs.sortAsc = ['symbol', 'sector', 'fPe', 'fPb', 'fDe'].includes(th.dataset.k); }
+  save(); render();
+});
 $('sigDlg').addEventListener('click', (e) => { if (e.target === $('sigDlg')) $('sigDlg').close(); });
 
 $('cards').addEventListener('click', (e) => {
@@ -918,4 +1058,5 @@ showView();
 refresh();
 schedule();
 loadAnalysis();
+loadFundamentals();
 setInterval(() => { if (!document.hidden) loadAnalysis(); }, 30 * 60e3); // daily data: re-check every 30 min, refetches after 4h

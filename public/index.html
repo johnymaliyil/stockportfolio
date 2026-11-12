@@ -110,7 +110,11 @@
 
       <div class="card">
         <div class="cardhead">
-          <h2>Holdings</h2>
+          <span class="row"><h2>Holdings</h2>
+            <span class="seg" role="tablist">
+              <button id="viewPrices" class="segbtn" role="tab">Prices</button>
+              <button id="viewFund" class="segbtn" role="tab">Fundamentals</button>
+            </span></span>
           <div class="row">
             <input id="search" type="search" placeholder="Filter…" />
             <select id="sortSel" class="show-sm" aria-label="Sort by">
@@ -120,6 +124,10 @@
               <option value="pnlPct">P&amp;L %</option>
               <option value="symbol">Name</option>
               <option value="sigScore">Signal</option>
+              <option value="fPe">P/E</option>
+              <option value="fRoe">ROE</option>
+              <option value="fDe">Debt/Eq</option>
+              <option value="fDy">Div. yield</option>
             </select>
             <label class="btn primary" title="Upload a statement or holdings file (PDF, Excel, CSV — any format)">⬆ Upload<input id="fileInput2" type="file" hidden /></label>
             <details class="menu">
@@ -142,7 +150,31 @@
         </div>
         <div id="sigFilterChip" class="row" hidden></div>
         <div id="cards" class="cards"></div>
-        <div class="tablewrap hide-sm">
+        <div id="fundWrap" class="tablewrap hide-sm" hidden>
+          <table id="fundTable">
+            <thead>
+              <tr>
+                <th data-k="symbol" class="l">Stock</th>
+                <th data-k="sector" class="l">Sector</th>
+                <th data-k="fMcap">Market cap</th>
+                <th data-k="fPe" title="Price ÷ earnings per share (last 12 months)">P/E</th>
+                <th data-k="fPb" title="Price ÷ book value per share">P/B</th>
+                <th data-k="fRoe" title="Return on equity — profit ÷ shareholders' money">ROE</th>
+                <th data-k="fDe" title="Total debt ÷ shareholders' equity">Debt/Eq</th>
+                <th data-k="fPm" title="Net profit ÷ revenue">Profit margin</th>
+                <th data-k="fRg" title="Revenue growth, latest quarter vs a year ago">Sales gr.</th>
+                <th data-k="fEg" title="Earnings growth, latest quarter vs a year ago">Profit gr.</th>
+                <th data-k="fDy">Div. yield</th>
+                <th data-k="fProm" title="Held by insiders / promoter group">Promoters</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p class="small muted">Colours are common rules of thumb, not verdicts: ROE ≥15% green / &lt;8% red · Debt/Eq ≤0.5 green / &gt;1.5 red
+            (not coloured for banks &amp; finance companies, which borrow by design) · margins and growth below 0 red, growth ≥10% green · dividend ≥2% green.
+            Source: Yahoo Finance; figures can lag the latest results by a quarter.</p>
+        </div>
+        <div id="pricesWrap" class="tablewrap hide-sm">
           <table id="holdings">
             <thead>
               <tr>

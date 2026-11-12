@@ -110,6 +110,18 @@ symbols/ISINs are, so their prices can be fetched.
 - Auto-refresh every 5s / 15s / 30s / 1m (paused while the tab is hidden), and price-change flashes
 - Add, edit and remove holdings by hand; export to CSV; light and dark themes
 
+## Fundamentals
+
+Switch the holdings list to **Fundamentals**, or tap **ⓘ** next to any stock, to see the company's numbers:
+sector and industry, market cap (large/mid/small/micro), P/E, P/B, EPS, book value, ROE, ROA, profit and operating
+margins, sales and profit growth, debt/equity, debt, cash, current ratio, dividend yield and payout, beta, and
+promoter/insider and institutional holding, plus a short business description.
+
+Values are coloured by common rules of thumb (ROE ≥ 15% green, < 8% red; debt/equity ≤ 0.5 green, > 1.5 red, not
+coloured for banks and finance companies; negative margins or growth red, growth ≥ 10% green; dividend yield ≥ 2% green).
+The Analysis card adds the portfolio's sector split, value-weighted P/E and ROE, expected yearly dividend, and how many
+holdings are loss-making. Data comes from Yahoo Finance, is refreshed daily, and can lag the latest quarterly results.
+
 ## Analysis (Strong / Neutral / Weak)
 
 The **Analysis** card checks every holding against its last year of daily prices, with the NIFTY 50 as the market
