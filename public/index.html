@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My Portfolio</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230f766e'/><path d='M6 22l7-7 5 4 8-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <h1>My Portfolio</h1>
+      <span id="marketStatus" class="pill">—</span>
+      <span id="demoBadge" class="pill warn" hidden>Demo prices</span>
+    </div>
+    <div class="actions">
+      <span id="lastUpdated" class="muted small"></span>
+      <label class="small muted" title="Auto-refresh interval">
+        Refresh
+        <select id="refreshSel">
+          <option value="5">5s</option>
+          <option value="15" selected>15s</option>
+          <option value="30">30s</option>
+          <option value="60">1m</option>
+          <option value="0">Off</option>
+        </select>
+      </label>
+      <button id="refreshBtn" class="btn" title="Refresh now">↻</button>
+      <button id="themeBtn" class="btn" title="Toggle theme">◐</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Empty state / upload -->
+    <section id="uploadSection" class="card upload">
+      <div id="dropZone" class="drop">
+        <h2>Upload your portfolio</h2>
+        <p class="muted">CSV or Excel (.xlsx). It needs columns for <b>symbol</b>, <b>quantity</b> and <b>average buy price</b>.
+          Zerodha, Groww, Upstox and most broker holdings exports work as they are.</p>
+        <div class="row center">
+          <label class="btn primary">
+            Choose file
+            <input id="fileInput" type="file" accept=".csv,.xlsx,.xls,.txt" hidden />
+          </label>
+          <a class="btn" href="sample-portfolio.csv" download>Download sample CSV</a>
+          <button id="loadSampleBtn" class="btn">Try the sample</button>
+        </div>
+        <p class="muted small">Symbols: <code>RELIANCE</code> or <code>NSE:RELIANCE</code> for NSE, <code>BSE:500325</code> or <code>500325</code> for BSE.
+          Your portfolio stays in this browser and is never uploaded anywhere.</p>
+      </div>
+    </section>
+
+    <!-- Dashboard -->
+    <section id="dashboard" hidden>
+      <div class="kpis">
+        <div class="card kpi"><div class="label">Current value</div><div id="kCurrent" class="value">—</div><div id="kCount" class="sub muted"></div></div>
+        <div class="card kpi"><div class="label">Invested</div><div id="kInvested" class="value">—</div><div class="sub muted">cost basis</div></div>
+        <div class="card kpi"><div class="label">Total P&amp;L</div><div id="kPnl" class="value">—</div><div id="kPnlPct" class="sub"></div></div>
+        <div class="card kpi"><div class="label">Today's P&amp;L</div><div id="kDay" class="value">—</div><div id="kDayPct" class="sub"></div></div>
+      </div>
+
+      <div class="card">
+        <div class="cardhead">
+          <h2>Allocation</h2>
+          <span class="muted small">by current value</span>
+        </div>
+        <div id="allocBar" class="allocbar"></div>
+        <div id="allocLegend" class="legend"></div>
+      </div>
+
+      <div class="card">
+        <div class="cardhead">
+          <h2>Holdings</h2>
+          <div class="row">
+            <input id="search" type="search" placeholder="Filter…" />
+            <button id="addBtn" class="btn">+ Add</button>
+            <label class="btn">Upload new<input id="fileInput2" type="file" accept=".csv,.xlsx,.xls,.txt" hidden /></label>
+            <button id="exportBtn" class="btn">Export CSV</button>
+            <button id="clearBtn" class="btn danger">Clear</button>
+          </div>
+        </div>
+        <div class="tablewrap">
+          <table id="holdings">
+            <thead>
+              <tr>
+                <th data-k="symbol" class="l">Stock</th>
+                <th data-k="qty">Qty</th>
+                <th data-k="avg">Avg cost</th>
+                <th data-k="price">LTP</th>
+                <th data-k="changePct">Day %</th>
+                <th class="nosort">Today</th>
+                <th data-k="invested">Invested</th>
+                <th data-k="current">Current</th>
+                <th data-k="pnl">P&amp;L</th>
+                <th data-k="pnlPct">P&amp;L %</th>
+                <th data-k="weight">Weight</th>
+                <th class="nosort"></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="editDlg">
+    <form method="dialog" id="editForm">
+      <h3 id="editTitle">Add holding</h3>
+      <label>Symbol <input name="symbol" required placeholder="e.g. RELIANCE or BSE:500325" /></label>
+      <label>Quantity <input name="qty" type="number" step="any" min="0" required /></label>
+      <label>Average buy price (₹) <input name="avg" type="number" step="any" min="0" required /></label>
+      <div class="row end">
+        <button value="cancel" class="btn" formnovalidate>Cancel</button>
+        <button value="ok" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+</body>
+</html>
