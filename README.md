@@ -27,7 +27,7 @@ You'll get an address like `https://stockportfolio-xyz.vercel.app`.
 
 Open the app and upload your statement PDFs or Excel reports, or a CSV (see below). Each phone/browser keeps its own
 copy of the portfolio (in local storage, nothing is stored on the server), so to move your data and typed-in buy prices
-between devices use **More → Export CSV (backup)** on one and upload that file on the other.
+between devices use **⬇ Download** on one and upload that file on the other.
 
 > Don't commit your statements or portfolio files to this repository — it is public. `.gitignore` already excludes
 > PDFs, Excel files and `my-portfolio*.csv`.
@@ -79,10 +79,16 @@ A stock held in two accounts is shown once per account, with the broker in its n
 holdings, so you can load every family account and switch between them, or view them combined, with the account picker in the
 header. A newer statement for the same account updates quantities and keeps the buy prices you typed in.
 
-### Backup / restore
+### Download
 
-**More → Export CSV (backup)** writes every holding with its account, ISIN, quantity, buy price and latest price.
-Uploading that file restores it exactly, accounts included. It also works as a template: fill in the *Avg Price* column
+**⬇ Download** saves whichever accounts you're viewing (all accounts, or the one selected in the account picker):
+
+- **Excel (.xlsx)**: a *Summary* sheet (invested, current value, P&L and today's P&L per account, plus the total) and a
+  *Holdings* sheet with every stock (quantity, buy price, latest price, invested, current value, P&L, weight).
+- **CSV (backup)**: the same holdings as plain text.
+
+Uploading either file restores the portfolio exactly, accounts and buy prices included.
+On a phone with the app installed, Download opens the share sheet, where you can save to Files or Drive or send the file. It also works as a template: fill in the *Avg Price* column
 in Excel or Google Sheets and upload it to set all buy prices at once.
 
 ### Buy prices

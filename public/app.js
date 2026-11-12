@@ -614,17 +614,81 @@ $('clearBtn').addEventListener('click', () => {
   save(); showView();
 });
 $('acctSel').addEventListener('change', (e) => { prefs.account = e.target.value; save(); render(); });
-$('exportBtn').addEventListener('click', () => {
-  const rows = computeRows();
-  const lines = [['Account', 'Account ID', 'Symbol', 'ISIN', 'Name', 'Quantity', 'Avg Price', 'LTP', 'Price Date', 'Day %', 'Invested', 'Current', 'P&L', 'P&L %'].join(',')]
-    .concat(rows.map((r) => [r.accountLabel || '', r.account || '', r.key, r.isin || '', r.name || '', r.qty, r.avg?.toFixed(2) ?? '', r.price?.toFixed(2) ?? '',
-      r.live ? new Date(r.q.time || Date.now()).toLocaleDateString('en-IN') : r.refDate || '', r.changePct?.toFixed(2) ?? '',
-      r.invested?.toFixed(2) ?? '', r.current?.toFixed(2) ?? '', r.pnl?.toFixed(2) ?? '', r.pnlPct?.toFixed(2) ?? ''].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')));
+// ---------- download ----------
+// One row per holding. Uploading the CSV or the Excel file back restores everything (accounts and buy prices included).
+const EXPORT_COLS = ['Account', 'Account ID', 'Symbol', 'ISIN', 'Name', 'Quantity', 'Avg Price', 'LTP', 'Price Date', 'Day %',
+  'Invested', 'Current', 'P&L', 'P&L %', 'Weight %'];
+const r2 = (v, d = 2) => (v == null || !isFinite(v) ? null : Number(v.toFixed(d)));
+function exportRows() {
+  return computeRows().sort((a, b) => (a.accountLabel || '').localeCompare(b.accountLabel || '') || a.display.localeCompare(b.display))
+    .map((r) => [r.accountLabel || '', r.account || '', r.key, r.isin || '', r.name || '', r.qty, r2(r.avg, 4), r2(r.price),
+      r.live ? new Date(r.q.time || Date.now()).toLocaleDateString('en-IN') : r.refDate || '', r2(r.changePct),
+      r2(r.invested), r2(r.current), r2(r.pnl), r2(r.pnlPct), r2(r.weight)]);
+}
+const fileStamp = () => {
+  const acct = selectedAccount() === 'all' ? 'all-accounts' : (accounts().find((a) => a.id === selectedAccount())?.label || 'account');
+  return `portfolio-${acct.replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase()}-${new Date().toISOString().slice(0, 10)}`;
+};
+
+// Save a file. Installed iPhone apps can't download blobs, so offer the share sheet there (Save to Files, WhatsApp, Drive…).
+async function deliver(blob, name) {
+  const file = new File([blob], name, { type: blob.type });
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if ((standalone || ios) && navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
-  a.download = `portfolio-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click(); URL.revokeObjectURL(a.href);
-});
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  toast(`Downloaded ${name}`);
+}
+
+function downloadCSV() {
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [EXPORT_COLS, ...exportRows()].map((r) => r.map(q).join(','));
+  deliver(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv' }), fileStamp() + '.csv'); // BOM so Excel shows ₹/· correctly
+}
+
+function downloadExcel() {
+  if (!window.XLSX) { toast('Excel writer not available offline — downloading CSV instead.'); return downloadCSV(); }
+  const rows = computeRows();
+  // Summary: one line per account plus the total
+  const groups = new Map();
+  for (const r of rows) { const k = r.accountLabel || 'Other'; (groups.get(k) || groups.set(k, []).get(k)).push(r); }
+  const sumUp = (label, rs) => {
+    const inv = rs.reduce((a, r) => a + (r.invested ?? 0), 0);
+    const cur = rs.reduce((a, r) => a + (r.current ?? r.invested ?? 0), 0);
+    const costed = rs.filter((r) => r.pnl != null);
+    const pnl = costed.reduce((a, r) => a + r.pnl, 0), base = costed.reduce((a, r) => a + r.invested, 0);
+    const day = rs.reduce((a, r) => a + (r.dayPnl ?? 0), 0);
+    return [label, rs.length, r2(inv), r2(cur), r2(pnl), base ? r2((pnl / base) * 100) : null, r2(day), rs.filter((r) => r.avg == null).length];
+  };
+  const summary = [['Account', 'Stocks', 'Invested', 'Current Value', 'P&L', 'P&L %', "Today's P&L", 'Without buy price']];
+  for (const [k, rs] of [...groups].sort()) summary.push(sumUp(k, rs));
+  if (groups.size > 1) summary.push(sumUp('TOTAL', rows));
+  summary.push([], [`Prices as of ${new Date().toLocaleString('en-IN')}. Stocks without a live price use their statement price.`]);
+
+  const wb = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.aoa_to_sheet(summary);
+  const ws2 = XLSX.utils.aoa_to_sheet([EXPORT_COLS, ...exportRows()]);
+  const money = '#,##0.00', fmtCols = (ws, cols) => {
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = 1; R <= range.e.r; R++) for (const C of cols) { const c = ws[XLSX.utils.encode_cell({ r: R, c: C })]; if (c && c.t === 'n') c.z = money; }
+  };
+  fmtCols(ws1, [2, 3, 4, 5, 6]); fmtCols(ws2, [6, 7, 9, 10, 11, 12, 13, 14]);
+  ws1['!cols'] = [22, 8, 14, 14, 14, 8, 12, 16].map((w) => ({ wch: w }));
+  ws2['!cols'] = [20, 18, 14, 14, 32, 9, 11, 10, 12, 8, 13, 13, 13, 9, 9].map((w) => ({ wch: w }));
+  ws2['!autofilter'] = { ref: ws2['!ref'] };
+  XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
+  XLSX.utils.book_append_sheet(wb, ws2, 'Holdings');
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  deliver(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileStamp() + '.xlsx');
+}
+
+$('exportBtn').addEventListener('click', downloadCSV);
+$('dlExcel').addEventListener('click', () => { closeMenus(); downloadExcel(); });
+$('dlCsv').addEventListener('click', () => { closeMenus(); downloadCSV(); });
 $('holdings').addEventListener('click', (e) => {
   const th = e.target.closest('th[data-k]');
   if (th) {
@@ -675,9 +739,11 @@ $('sortSel').addEventListener('change', (e) => {
   prefs.sortKey = e.target.value; prefs.sortAsc = e.target.value === 'symbol'; save(); render();
 });
 // close the "More" menu after picking something / tapping elsewhere
+const closeMenus = () => document.querySelectorAll('details.menu[open]').forEach((m) => (m.open = false));
 document.addEventListener('click', (e) => {
-  const m = document.querySelector('details.menu');
-  if (m?.open && (!m.contains(e.target) || e.target.closest('.menulist button'))) m.open = false;
+  document.querySelectorAll('details.menu[open]').forEach((m) => {
+    if (!m.contains(e.target) || e.target.closest('.menulist button')) m.open = false;
+  });
 });
 
 // ---------- PWA: offline support + install ----------
