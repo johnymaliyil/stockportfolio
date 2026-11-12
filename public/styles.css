@@ -136,3 +136,12 @@ dialog label { display: grid; gap: 4px; margin-bottom: 12px; font-size: 13px; }
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 20;
   background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; max-width: calc(100vw - 32px);
 }
+
+.banner { border-color: var(--warn); display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.banner[hidden] { display: none; }
+.avgin { width: 96px; text-align: right; padding: 3px 6px; }
+.avgcell { cursor: pointer; }
+.avgcell:hover { text-decoration: underline dotted; }
+.stale { color: var(--muted); font-size: 11px; display: block; font-weight: normal; }
+.acct { display: inline-block; font-size: 10px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); }
+#acctSel[hidden] { display: none; }

@@ -18,9 +18,13 @@ const cache = new Map(); // yahooSymbol -> { at, data }
 
 // ---------- symbol handling ----------
 
+const ISIN_RE = /^IN[A-Z0-9]{9}\d$/;
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36';
+
 // Turn whatever the user's broker export has into a Yahoo symbol.
 // RELIANCE -> RELIANCE.NS, NSE:TCS -> TCS.NS, BSE:500325 / 500325 -> 500325.BO,
 // INFY-EQ -> INFY.NS, already-suffixed symbols are kept as-is.
+// (ISINs are handled separately by resolveIsin.)
 function toYahooSymbol(raw) {
   let s = String(raw || '').trim().toUpperCase().replace(/\s+/g, '');
   if (!s) return null;
@@ -33,6 +37,70 @@ function toYahooSymbol(raw) {
   return `${s}.${exch}`;
 }
 
+// ISIN -> NSE symbol, using NSE's published list of equities (refreshed every 12h),
+// falling back to Yahoo's search for anything not listed on NSE.
+const isinCache = new Map(); // isin -> yahoo symbol
+let master = { at: 0, map: new Map(), failedAt: 0 };
+
+// NSE's lists of equities and ETFs: SYMBOL ... ISIN columns.
+async function fetchNseList(url) {
+  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/csv,*/*' }, signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const lines = (await res.text()).split(/\r?\n/);
+  const head = lines[0].split(',').map((h) => h.trim().toUpperCase());
+  const iSym = head.indexOf('SYMBOL'), iIsin = head.findIndex((h) => h.startsWith('ISIN'));
+  const map = new Map();
+  for (const line of lines.slice(1)) {
+    const c = line.split(','); // names may contain commas, so look for the ISIN if its column shifted
+    const at = (c[iIsin] || '').trim();
+    const isin = ISIN_RE.test(at) ? at : (c.find((x) => ISIN_RE.test(x.trim())) || '').trim();
+    if (ISIN_RE.test(isin) && c[iSym]) map.set(isin, c[iSym].trim());
+  }
+  return map;
+}
+
+async function loadNseMaster() {
+  const fresh = Date.now() - master.at < 12 * 3600e3;
+  const recentlyFailed = Date.now() - master.failedAt < 10 * 60e3;
+  if ((fresh && master.map.size) || recentlyFailed) return master.map;
+  try {
+    const map = await fetchNseList('https://archives.nseindia.com/content/equities/EQUITY_L.csv');
+    if (map.size < 500) throw new Error('unexpected file');
+    try { for (const [k, v] of await fetchNseList('https://archives.nseindia.com/content/equities/eq_etfseclist.csv')) map.set(k, v); }
+    catch (e) { console.warn('Could not load NSE ETF list:', e.message); }
+    master = { at: Date.now(), map, failedAt: 0 };
+    console.log(`Loaded ${map.size} NSE ISIN mappings`);
+  } catch (e) {
+    master.failedAt = Date.now();
+    console.warn('Could not load NSE equity list:', e.message);
+  }
+  return master.map;
+}
+
+async function resolveIsin(isin) {
+  if (isinCache.has(isin)) return isinCache.get(isin);
+  if (MOCK) return `${isin}.NS`;
+  const nse = (await loadNseMaster()).get(isin);
+  if (nse) { isinCache.set(isin, `${nse}.NS`); return `${nse}.NS`; }
+  for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
+    try {
+      const res = await fetch(`https://${host}/v1/finance/search?q=${isin}&quotesCount=6&newsCount=0`, {
+        headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) continue;
+      const syms = ((await res.json()).quotes || []).map((q) => q.symbol).filter(Boolean);
+      const hit = syms.find((s) => s.endsWith('.NS')) || syms.find((s) => s.endsWith('.BO'));
+      if (hit) { isinCache.set(isin, hit); return hit; }
+    } catch {}
+  }
+  throw Object.assign(new Error(`No NSE/BSE symbol found for ISIN ${isin} — edit it and enter the symbol`), { fatal: true });
+}
+
+async function resolveSymbol(raw) {
+  const s = String(raw || '').trim().toUpperCase();
+  return ISIN_RE.test(s) ? resolveIsin(s) : toYahooSymbol(s);
+}
+
 // ---------- quote providers ----------
 
 async function fetchYahoo(sym) {
@@ -42,7 +110,7 @@ async function fetchYahoo(sym) {
     try {
       const url = `https://${host}/v8/finance/chart/${encodeURIComponent(sym)}?range=1d&interval=5m`;
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (portfolio-tracker)', Accept: 'application/json' },
+        headers: { 'User-Agent': UA, Accept: 'application/json' },
         signal: AbortSignal.timeout(8000),
       });
       if (res.status === 404) throw Object.assign(new Error('Symbol not found'), { fatal: true });
@@ -94,7 +162,7 @@ function fetchMock(sym) {
   st.spark.push(st.price); if (st.spark.length > 78) st.spark.shift();
   const price = +st.price.toFixed(2);
   return {
-    symbol: sym, name: sym.replace(/\.(NS|BO)$/, '') + ' (demo)', exchange: sym.endsWith('.BO') ? 'BSE' : 'NSE',
+    symbol: sym, name: sym.replace(/\.(NS|BO)$/, ''), exchange: sym.endsWith('.BO') ? 'BSE' : 'NSE',
     currency: 'INR', price, prevClose: st.prevClose, change: price - st.prevClose,
     changePct: ((price - st.prevClose) / st.prevClose) * 100,
     dayHigh: Math.max(...st.spark), dayLow: Math.min(...st.spark),
@@ -117,10 +185,12 @@ async function getQuotes(rawSymbols) {
   const worker = async () => {
     while (queue.length) {
       const raw = queue.shift();
-      const sym = toYahooSymbol(raw);
-      if (!sym) continue;
-      try { out[raw] = await getQuote(sym); }
-      catch (e) { out[raw] = { symbol: sym, error: e.message || 'Failed' }; }
+      let sym = null;
+      try {
+        sym = await resolveSymbol(raw);
+        if (!sym) continue;
+        out[raw] = await getQuote(sym);
+      } catch (e) { out[raw] = { symbol: sym, error: e.message || 'Failed' }; }
     }
   };
   await Promise.all(Array.from({ length: 8 }, worker));
@@ -167,4 +237,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { toYahooSymbol };
+module.exports = { toYahooSymbol, resolveSymbol };

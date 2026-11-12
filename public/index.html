@@ -7,6 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230f766e'/><path d='M6 22l7-7 5 4 8-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
   <link rel="stylesheet" href="styles.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -16,6 +17,7 @@
       <h1>My Portfolio</h1>
       <span id="marketStatus" class="pill">—</span>
       <span id="demoBadge" class="pill warn" hidden>Demo prices</span>
+      <select id="acctSel" title="Demat account" hidden></select>
     </div>
     <div class="actions">
       <span id="lastUpdated" class="muted small"></span>
@@ -39,12 +41,13 @@
     <section id="uploadSection" class="card upload">
       <div id="dropZone" class="drop">
         <h2>Upload your portfolio</h2>
-        <p class="muted">CSV or Excel (.xlsx). It needs columns for <b>symbol</b>, <b>quantity</b> and <b>average buy price</b>.
+        <p class="muted">A <b>DP holding statement PDF</b> (Geojit / IndusInd Money, NSDL or CDSL), or a CSV / Excel file with
+          <b>symbol</b> (or ISIN), <b>quantity</b> and, optionally, <b>average buy price</b>.
           Zerodha, Groww, Upstox and most broker holdings exports work as they are.</p>
         <div class="row center">
           <label class="btn primary">
             Choose file
-            <input id="fileInput" type="file" accept=".csv,.xlsx,.xls,.txt" hidden />
+            <input id="fileInput" type="file" accept=".csv,.xlsx,.xlsm,.xls,.txt,.pdf" hidden />
           </label>
           <a class="btn" href="sample-portfolio.csv" download>Download sample CSV</a>
           <button id="loadSampleBtn" class="btn">Try the sample</button>
@@ -63,6 +66,8 @@
         <div class="card kpi"><div class="label">Today's P&amp;L</div><div id="kDay" class="value">—</div><div id="kDayPct" class="sub"></div></div>
       </div>
 
+      <div id="costBanner" class="card banner" hidden></div>
+
       <div class="card">
         <div class="cardhead">
           <h2>Allocation</h2>
@@ -78,7 +83,7 @@
           <div class="row">
             <input id="search" type="search" placeholder="Filter…" />
             <button id="addBtn" class="btn">+ Add</button>
-            <label class="btn">Upload new<input id="fileInput2" type="file" accept=".csv,.xlsx,.xls,.txt" hidden /></label>
+            <label class="btn">Upload new<input id="fileInput2" type="file" accept=".csv,.xlsx,.xlsm,.xls,.txt,.pdf" hidden /></label>
             <button id="exportBtn" class="btn">Export CSV</button>
             <button id="clearBtn" class="btn danger">Clear</button>
           </div>
@@ -111,9 +116,9 @@
   <dialog id="editDlg">
     <form method="dialog" id="editForm">
       <h3 id="editTitle">Add holding</h3>
-      <label>Symbol <input name="symbol" required placeholder="e.g. RELIANCE or BSE:500325" /></label>
+      <label>Symbol <input name="symbol" required placeholder="e.g. RELIANCE, BSE:500325 or an ISIN" /></label>
       <label>Quantity <input name="qty" type="number" step="any" min="0" required /></label>
-      <label>Average buy price (₹) <input name="avg" type="number" step="any" min="0" required /></label>
+      <label>Average buy price (₹) <input name="avg" type="number" step="any" min="0" placeholder="Optional, needed for P&amp;L" /></label>
       <div class="row end">
         <button value="cancel" class="btn" formnovalidate>Cancel</button>
         <button value="ok" class="btn primary">Save</button>
