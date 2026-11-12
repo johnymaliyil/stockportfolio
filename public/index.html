@@ -49,13 +49,13 @@
     <section id="uploadSection" class="card upload">
       <div id="dropZone" class="drop">
         <h2>Upload your portfolio</h2>
-        <p class="muted">A <b>DP holding statement PDF</b> (Geojit / IndusInd Money, NSDL or CDSL), or a CSV / Excel file with
-          <b>symbol</b> (or ISIN), <b>quantity</b> and, optionally, <b>average buy price</b>.
-          Zerodha, Groww, Upstox and most broker holdings exports work as they are.</p>
+        <p class="muted">Any holdings file: a <b>DP holding statement PDF</b> (NSDL or CDSL — Geojit, IndusInd…), a broker report in
+          <b>Excel</b> (xls, xlsx, xlsm, ods), <b>CSV / TSV / TXT</b>, or a backup exported from this app. It needs a
+          <b>symbol or ISIN</b> and a <b>quantity</b>; the buy price is optional and can be typed in afterwards.</p>
         <div class="row center">
           <label class="btn primary">
-            Choose file
-            <input id="fileInput" type="file" accept=".csv,.xlsx,.xlsm,.xls,.txt,.pdf" hidden />
+            Upload file
+            <input id="fileInput" type="file" hidden />
           </label>
           <a class="btn" href="sample-portfolio.csv" download>Download sample CSV</a>
           <button id="loadSampleBtn" class="btn">Try the sample</button>
@@ -99,11 +99,11 @@
               <option value="pnlPct">P&amp;L %</option>
               <option value="symbol">Name</option>
             </select>
+            <label class="btn primary" title="Upload a statement or holdings file (PDF, Excel, CSV — any format)">⬆ Upload<input id="fileInput2" type="file" hidden /></label>
             <button id="addBtn" class="btn">+ Add</button>
             <details class="menu">
               <summary class="btn">More ▾</summary>
               <div class="menulist card">
-                <label class="btn">Upload statement / file<input id="fileInput2" type="file" accept=".csv,.xlsx,.xlsm,.xls,.txt,.pdf" hidden /></label>
                 <button id="exportBtn" class="btn">Export CSV (backup)</button>
                 <button id="installBtn" class="btn" hidden>Install app</button>
                 <button id="clearBtn" class="btn danger">Clear</button>
@@ -118,7 +118,7 @@
               <tr>
                 <th data-k="symbol" class="l">Stock</th>
                 <th data-k="qty">Qty</th>
-                <th data-k="avg">Avg cost</th>
+                <th data-k="avg">Buy price</th>
                 <th data-k="price">LTP</th>
                 <th data-k="changePct">Day %</th>
                 <th class="nosort">Today</th>

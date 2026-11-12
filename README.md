@@ -44,13 +44,19 @@ PORT=8080 npm start
 
 ## What you can upload
 
-- **DP holding statement PDFs**, from NSDL depository participants (e.g. Geojit / IndusInd Money) and from CDSL ones
-  (e.g. IndusInd Securities). These list ISIN, quantity and the previous close.
-- **Broker holdings reports in Excel** (`.xlsx` / `.xlsm`), for example SMC Global. The broker's letterhead rows above the table
-  are skipped. Client code, name and report date are read from them.
-- **Any CSV / Excel file** with a symbol or ISIN column and a quantity column. An average buy price column is optional.
-  Column names are matched loosely (`Symbol`/`Instrument`/`ISIN`, `Qty`/`Quantity`/`Total Qty`, `Avg. cost`/`Buy Price`, …),
-  so Zerodha, Groww, Upstox and similar exports work.
+Tap **⬆ Upload** and pick any file. The format is worked out from the file's contents, so a missing or wrong
+extension doesn't matter:
+
+- **DP holding statement PDFs** from NSDL participants (e.g. Geojit) and CDSL participants (e.g. IndusInd Securities).
+  Other PDFs that contain a holdings table (symbol, quantity, …) are read as a table.
+- **Excel**: `.xls`, `.xlsx`, `.xlsm`, `.ods`, including the "Excel" downloads some brokers make that are really HTML tables.
+  Letterhead rows above the table are skipped, and client code, name and report date are read from them (e.g. SMC Global reports).
+- **CSV / TSV / TXT**, separated by commas, tabs, semicolons or `|`, in UTF-8 or UTF-16. This includes backups exported from this app.
+- Photos or scans can't be read. Download the statement as PDF, Excel or CSV instead.
+
+The file needs a symbol or ISIN column and a quantity column. An average buy price column is optional.
+Column names are matched loosely (`Symbol`/`Instrument`/`Scrip`/`ISIN`, `Qty`/`Quantity`/`Total Qty`, `Avg. cost`/`Buy Price`, …),
+so Zerodha, Groww, Upstox and similar exports work.
 
 ```csv
 Symbol,Quantity,Avg Price
@@ -68,7 +74,8 @@ INE002A01018,4,
 
 ### Several demat accounts
 
-Each statement is tied to its account (DP / BO ID or client code). Uploading a statement replaces **only that account's**
+Each statement is tied to its account (DP / BO ID or client code) and named after the broker and holder, e.g. *Geojit · Leela*.
+A stock held in two accounts is shown once per account, with the broker in its name. Uploading a statement replaces **only that account's**
 holdings, so you can load every family account and switch between them, or view them combined, with the account picker in the
 header. A newer statement for the same account updates quantities and keeps the buy prices you typed in.
 
@@ -80,8 +87,8 @@ in Excel or Google Sheets and upload it to set all buy prices at once.
 
 ### Buy prices
 
-Depository statements don't include what you paid. Type it into the **Avg cost** box in the table and press Enter, which moves
-you to the next row. On a phone, tap a stock (or *+ Add buy price*). Without a buy price a holding still counts towards the current value and today's change, but not towards P&L.
+Depository statements don't include what you paid. Every stock has a **Buy price** box, in the table and on the phone cards. Type a price, or change or clear one, and press Enter.
+Enter saves it and moves you to the next stock. Without a buy price a holding still counts towards the current value and today's change, but not towards P&L.
 
 If a stock has no live price (for example unlisted or delisted shares), the price from the statement is used and marked as such.
 

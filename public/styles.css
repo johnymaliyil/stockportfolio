@@ -140,7 +140,9 @@ dialog input { width: 100%; min-width: 0; }
 
 .banner { border-color: var(--warn); display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
 .banner[hidden] { display: none; }
-.avgin { width: 96px; text-align: right; padding: 3px 6px; }
+.avgin { width: 104px; text-align: right; padding: 3px 6px; }
+.avgin.empty { border-color: var(--warn); border-style: dashed; }
+.avgin::placeholder { color: var(--warn); }
 .avgcell { cursor: pointer; }
 .avgcell:hover { text-decoration: underline dotted; }
 .stale { color: var(--muted); font-size: 11px; display: block; font-weight: normal; }
@@ -178,7 +180,8 @@ body { padding-bottom: env(safe-area-inset-bottom); }
   #acctSel { max-width: 46vw; }
   .topbar .btn, .topbar select { padding: 4px 8px; }
   .cardhead .row { width: 100%; }
-  #search { flex: 1; min-width: 0; width: auto; }
+  #search { flex: 1 1 100%; min-width: 0; width: auto; }
+  #sortSel { flex: 1; }
   input, select { font-size: 16px; } /* stops iOS zooming into inputs */
 }
 
@@ -195,3 +198,5 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .hcard .r2, .hcard .r3 { font-size: 13px; font-variant-numeric: tabular-nums; }
 .hcard .addcost { border: 1px dashed var(--warn); color: var(--warn); background: none; border-radius: 6px; padding: 1px 8px; font: inherit; font-size: 12px; }
 .hcard .err { font-size: 11px; }
+.costin { display: inline-flex; align-items: center; gap: 6px; }
+.costin .avgin { width: 110px; padding: 4px 8px; }

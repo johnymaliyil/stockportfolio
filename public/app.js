@@ -64,7 +64,8 @@ function findCols(header) {
 
 function parseCSV(text) {
   const rows = []; let row = [], cur = '', q = false;
-  const delim = (text.split('\n')[0].match(/\t/g) || []).length > (text.split('\n')[0].match(/,/g) || []).length ? '\t' : ',';
+  const sample = text.split('\n').slice(0, 40).join('\n');
+  const delim = [',', '\t', ';', '|'].map((d) => [d, sample.split(d).length]).sort((a, b) => b[1] - a[1])[0][0];
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (q) {
@@ -84,7 +85,9 @@ function parseCSV(text) {
 
 const toNum = (v) => {
   if (typeof v === 'number') return v;
-  const n = parseFloat(String(v ?? '').replace(/[₹,\s]/g, '').replace(/^Rs\.?/i, ''));
+  let t = String(v ?? '').trim().replace(/^(Rs\.?|INR|₹)\s*/i, '').replace(/\s/g, '');
+  if (/^-?\d+,\d{1,2}$/.test(t)) t = t.replace(',', '.'); // decimal comma (2450,5); Indian thousands groups are 3 digits
+  const n = parseFloat(t.replace(/[₹,]/g, ''));
   return isFinite(n) ? n : NaN;
 };
 
@@ -135,7 +138,7 @@ function rowsToHoldings(rows) {
     addMerged(merged, h);
   }
   if (!merged.size) throw new Error('No valid rows found (need a quantity above 0).');
-  const label = code ? `${holder ? titleCase(holder.split(/\s+/)[0]) + ' ' : ''}${code}` : null;
+  const label = code ? accountLabel(brokerOf(pre), holder, code) : null;
   return { list: [...merged.values()], skipped, account: code, label };
 }
 
@@ -165,7 +168,7 @@ async function pdfLines(buf) {
   for (let p = 1; p <= doc.numPages; p++) {
     const items = (await (await doc.getPage(p)).getTextContent()).items
       .filter((it) => it.str.trim())
-      .map((it) => ({ s: it.str.trim(), x: it.transform[4], y: it.transform[5] }))
+      .map((it) => ({ s: it.str.trim(), x: it.transform[4], y: it.transform[5], w: it.width || 0 }))
       .sort((a, b) => b.y - a.y || a.x - b.x);
     let cur = null;
     for (const it of items) {
@@ -173,10 +176,39 @@ async function pdfLines(buf) {
       else { cur = { y: it.y, items: [it] }; lines.push(cur); }
     }
   }
-  return lines.map((l) => l.items.sort((a, b) => a.x - b.x).map((i) => i.s).join(' ').replace(/\s+/g, ' '));
+  const sorted = lines.map((l) => l.items.sort((a, b) => a.x - b.x));
+  // cells: neighbouring text runs separated by a visible gap are separate table columns
+  const cells = sorted.map((items) => items.reduce((acc, it) => {
+    const last = acc[acc.length - 1];
+    if (last && it.x - last.end < 6) { last.s += ' ' + it.s; last.end = it.x + it.w; } else acc.push({ s: it.s, end: it.x + it.w });
+    return acc;
+  }, []).map((c) => c.s));
+  const text = sorted.map((items) => items.map((i) => i.s).join(' ').replace(/\s+/g, ' '));
+  text.cells = cells;
+  return text;
 }
 
 // Account number, holder and statement date from the header of a DP statement.
+// Which broker / depository participant a statement is from, judged from its letterhead.
+const BROKERS = [[/geojit/i, 'Geojit'], [/indusind/i, 'IndusInd'], [/smc\s*global|smcindiaonline/i, 'SMC'], [/zerodha/i, 'Zerodha'],
+  [/groww|nextbillion/i, 'Groww'], [/upstox|rksv/i, 'Upstox'], [/angel\s*(one|broking)/i, 'Angel One'], [/icici\s*sec|icicidirect/i, 'ICICI Direct'],
+  [/hdfc\s*sec/i, 'HDFC Sec'], [/kotak\s*sec/i, 'Kotak'], [/motilal/i, 'Motilal Oswal'], [/sharekhan/i, 'Sharekhan'], [/5\s*paisa/i, '5paisa'],
+  [/\bdhan\b|moneylicious/i, 'Dhan'], [/axis\s*sec|axisdirect/i, 'Axis Direct'], [/sbicap|sbi\s*sec/i, 'SBI Sec'], [/paytm\s*money/i, 'Paytm Money'],
+  [/fyers/i, 'Fyers'], [/\biifl\b/i, 'IIFL'], [/edelweiss|nuvama/i, 'Nuvama'], [/\bnsdl\b/i, 'NSDL'], [/\bcdsl\b/i, 'CDSL']];
+function brokerOf(headerText) {
+  let best = null, at = Infinity;
+  for (const [re, name] of BROKERS) { const i = headerText.search(re); if (i >= 0 && i < at) { at = i; best = name; } }
+  return best;
+}
+// "IndusInd · Johny", falling back to the last digits of the account number.
+function accountLabel(broker, holder, id) {
+  const first = holder ? titleCase(holder.trim().split(/\s+/)[0]) : '';
+  if (broker && first) return `${broker} · ${first}`;
+  if (broker || first) return `${broker || first} …${String(id).slice(-4)}`;
+  return id ? `…${String(id).slice(-4)}` : null;
+}
+const brokerPart = (label) => String(label || '').split(' · ')[0];
+
 function statementInfo(lines) {
   const all = lines.join('\n');
   const id = (all.match(/\bDP\s*(?:ID)?\s*[:\-]?\s*(IN\d{6}[-\s]?\d{8})\b/)?.[1]    // NSDL: DP IN300239-12345678
@@ -184,8 +216,7 @@ function statementInfo(lines) {
     || all.match(/\bClient\s*ID\s*[:\-]?\s*(\d{8,16})\b/i)?.[1] || '').replace(/\s/g, '');
   const holder = (lines.find((l) => /^Name\s+\S/i.test(l)) || '').replace(/^Name\s+/i, '').replace(/\s+DP\b.*$/, '').trim();
   const asOn = all.match(/As\s*on(?:\s*Date)?\s*:?\s*(\d{1,2}-[A-Za-z]{3}-\d{4}|[A-Z][a-z]{2}\s+\d{1,2}\s+\d{4})/i)?.[1] || null;
-  const first = holder.split(/\s+/)[0];
-  const label = id ? `${first ? titleCase(first) + ' ' : ''}…${id.slice(-4)}` : null;
+  const label = id ? accountLabel(brokerOf(lines.slice(0, 15).join('\n')), holder, id) : null;
   return { account: id || null, label, asOn };
 }
 
@@ -243,31 +274,51 @@ function parseDpStatement(lines) {
   const info = statementInfo(lines);
   let rows = parseNsdlRows(lines);
   if (!rows.length) rows = parseCdslRows(lines);
+  if (!rows.length && lines.cells) {
+    // Not a DP statement layout we know: read the PDF as a table (Symbol / Qty / Avg price … columns).
+    try {
+      const t = rowsToHoldings(lines.cells);
+      return { ...t, account: t.account || info.account, label: t.label || info.label };
+    } catch {}
+  }
   const merged = new Map();
   for (const r of rows) addMerged(merged, { symbol: r.isin, ...r, avg: null, refDate: info.asOn });
-  if (!merged.size) throw new Error('No holdings found in this PDF. If it is a scanned image, export the statement as CSV/Excel instead.');
+  if (!merged.size) throw new Error('No holdings found in this PDF. If it is a scanned image or a photo, download the statement as PDF/Excel/CSV from your broker instead.');
   return { list: [...merged.values()], skipped: 0, account: info.account, label: info.label };
 }
 
 const titleCase = (s) => s.toLowerCase().replace(/(^|[\s(&/-])([a-z])/g, (m, p, c) => p + c.toUpperCase());
 
+// Read any holdings file: the format is detected from the contents, so the file name / extension doesn't matter.
 async function readFile(file) {
-  if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') return parseDpStatement(await pdfLines(await file.arrayBuffer()));
-  const isExcel = /\.(xlsx|xlsm|xls)$/i.test(file.name);
-  let rows;
-  if (isExcel) {
-    if (!window.XLSX) throw new Error('Excel reader did not load (offline?). Save the sheet as CSV and upload that.');
-    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-    // pick the first sheet that has a recognisable header
-    for (const name of wb.SheetNames) {
-      const r = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
-      try { rowsToHoldings(r); rows = r; break; } catch {}
-    }
-    if (!rows) rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
-  } else {
-    rows = parseCSV((await file.text()).replace(/^﻿/, ''));
+  const buf = await file.arrayBuffer();
+  const b = new Uint8Array(buf.slice(0, 8));
+  const head = String.fromCharCode(...b);
+  if (head.startsWith('%PDF')) return parseDpStatement(await pdfLines(buf));
+  if ((b[0] === 0x50 && b[1] === 0x4b) || (b[0] === 0xd0 && b[1] === 0xcf)) return readWorkbook(buf, 'array'); // xlsx/xlsm/ods (zip), old .xls
+  if (/^(\x89PNG|\xFF\xD8\xFF|GIF8|RIFF|....ftyp)/.test(head)) throw new Error('That is a photo/image. Upload the statement as PDF, Excel or CSV instead.');
+  const text = (b[0] === 0xff && b[1] === 0xfe ? new TextDecoder('utf-16le') : b[0] === 0xfe && b[1] === 0xff ? new TextDecoder('utf-16be') : new TextDecoder())
+    .decode(buf).replace(/^\uFEFF/, '');
+  if (/^\s*</.test(text) && /<table/i.test(text)) return readWorkbook(text, 'string'); // "Excel" exports that are really HTML tables
+  if (/^\s*[[{]/.test(text)) {
+    try {
+      let data = JSON.parse(text);
+      if (!Array.isArray(data)) data = data.holdings || data.data || Object.values(data).find(Array.isArray) || [];
+      const keys = [...new Set(data.flatMap((o) => Object.keys(o || {})))];
+      return rowsToHoldings([keys, ...data.map((o) => keys.map((k) => o[k] ?? ''))]);
+    } catch (e) { if (!(e instanceof SyntaxError)) throw e; }
   }
-  return rowsToHoldings(rows);
+  return rowsToHoldings(parseCSV(text));
+}
+
+function readWorkbook(data, type) {
+  if (!window.XLSX) throw new Error('Spreadsheet reader did not load (offline?). Connect to the internet and try again.');
+  const wb = XLSX.read(data, { type });
+  let err;
+  for (const name of wb.SheetNames) { // first sheet with a recognisable holdings table
+    try { return rowsToHoldings(XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' })); } catch (e) { err = e; }
+  }
+  throw err || new Error('This workbook has no sheets.');
 }
 
 async function importFile(file) {
@@ -386,6 +437,10 @@ function computeRows() {
   return rows;
 }
 
+// Editable buy-price box used in the table and on the phone cards.
+const avgInput = (r) => `<input class="avgin${r.avg == null ? ' empty' : ''}" data-avg="${r.i}" type="number" inputmode="decimal" step="any" min="0"
+  value="${r.avg ?? ''}" placeholder="Add" title="Average buy price — type to change" aria-label="Average buy price for ${esc(r.display)}">`;
+
 function sparkSVG(pts, up) {
   if (!pts || pts.length < 2) return '';
   const w = 64, h = 20, min = Math.min(...pts), max = Math.max(...pts), rng = max - min || 1;
@@ -416,18 +471,17 @@ function render() {
   $('kPnlPct').className = 'sub ' + (pnlBase ? cls(pnl) : 'muted');
   const banner = $('costBanner');
   banner.hidden = !missing;
-  if (missing) banner.innerHTML = `<span><b>${missing} holding${missing > 1 ? 's have' : ' has'} no average buy price</b> <span class="muted">— DP statements don't include it. Enter it with <b>Add</b> / <b>+ Add buy price</b> next to each stock to see P&amp;L. Buy prices are kept when you upload a newer statement.</span></span>`;
+  if (missing) banner.innerHTML = `<span><b>${missing} holding${missing > 1 ? 's have' : ' has'} no average buy price</b> <span class="muted">— DP statements don't include it. Type it in the <b>Buy price</b> box next to each stock to see P&amp;L. Buy prices are kept when you upload a newer statement.</span></span>`;
   $('kDay').textContent = signed(day); $('kDay').className = 'value ' + cls(day);
   $('kDayPct').textContent = prevVal ? pct((day / prevVal) * 100) : ''; $('kDayPct').className = 'sub ' + cls(day);
   document.title = `${signed(day, inr0)} · My Portfolio`;
 
   // allocation
-  const agg = new Map(); // the same stock held in two accounts is one slice (statements spell names differently, so key by ISIN)
-  for (const r of rows) {
-    const k = r.isin || r.display, g = agg.get(k) || { display: r.display, weight: 0 };
-    g.weight += r.weight; agg.set(k, g);
-  }
-  const byW = [...agg.values()].sort((a, b) => b.weight - a.weight);
+  // One slice per holding; a stock held in several accounts gets the broker added to its name.
+  const seen = {};
+  for (const r of rows) { const k = r.isin || r.display; seen[k] = (seen[k] || 0) + 1; }
+  const byW = rows.map((r) => ({ display: seen[r.isin || r.display] > 1 ? `${r.display} (${brokerPart(r.accountLabel) || 'other'})` : r.display, weight: r.weight }))
+    .sort((a, b) => b.weight - a.weight);
   const top = byW.slice(0, 9);
   const rest = byW.slice(9).reduce((a, r) => a + r.weight, 0);
   const segs = top.map((r, i) => ({ label: r.display, w: r.weight, c: PALETTE[i] }));
@@ -450,9 +504,7 @@ function render() {
     const prev = prevPrices[r.symbol];
     const flash = prev != null && r.price != null && prev !== r.price ? (r.price > prev ? 'flash-up' : 'flash-down') : '';
     const sub = `<div class="nm" title="${esc(r.isin || '')}">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div>` + (r.q.error ? `<div class="err">⚠ ${esc(r.q.error)}</div>` : '');
-    const avgCell = r.avg == null
-      ? `<td><input class="avgin" data-avg="${r.i}" type="number" step="any" min="0" placeholder="Add" aria-label="Average buy price for ${esc(r.display)}"></td>`
-      : `<td class="avgcell" data-avgedit="${r.i}" title="Click to change">${fmt(r.avg)}</td>`;
+    const avgCell = `<td>${avgInput(r)}</td>`;
     const stale = r.price != null && !r.live ? `<span class="stale">statement${r.refDate ? ' ' + esc(r.refDate) : ''}</span>` : '';
     return `<tr>
       <td class="l"><div class="sym">${esc(r.display)}</div>${sub}</td>
@@ -475,9 +527,7 @@ function render() {
     const prev = prevPrices[r.symbol];
     const flash = prev != null && r.price != null && prev !== r.price ? (r.price > prev ? 'flash-up' : 'flash-down') : '';
     const stale = r.price != null && !r.live ? ' <span class="muted small">(stmt)</span>' : '';
-    const cost = r.avg == null
-      ? `<button class="addcost" data-card="${r.i}">+ Add buy price</button>`
-      : `<span class="muted">Avg ${fmt(r.avg)} · Inv ${fmt(r.invested, inr0)}</span>`;
+    const cost = `<label class="costin"><span class="muted">Buy ₹</span>${avgInput(r)}${r.invested != null ? `<span class="muted small">Inv ${fmt(r.invested, inr0)}</span>` : ''}</label>`;
     return `<div class="hcard" data-card="${r.i}">
       <div class="r1"><div><div class="sym">${esc(r.display)}</div><div class="nm">${r.acctTag ? `<span class="acct">${esc(r.acctTag)}</span> ` : ''}${esc(r.name || '')}</div></div>
         <div class="val">${fmt(r.current)}</div></div>
@@ -582,12 +632,6 @@ $('holdings').addEventListener('click', (e) => {
     else { prefs.sortKey = th.dataset.k; prefs.sortAsc = th.dataset.k === 'symbol'; }
     save(); return render();
   }
-  const ae = e.target.closest('[data-avgedit]');
-  if (ae) {
-    const i = Number(ae.dataset.avgedit);
-    ae.outerHTML = `<td><input class="avgin" data-avg="${i}" type="number" step="any" min="0" value="${holdings[i].avg}"></td>`;
-    const inp = $('holdings').querySelector(`[data-avg="${i}"]`); inp.focus(); inp.select(); return;
-  }
   const ed = e.target.closest('[data-edit]');
   if (ed) return openEdit(Number(ed.dataset.edit));
   const del = e.target.closest('[data-del]');
@@ -598,21 +642,32 @@ $('holdings').addEventListener('click', (e) => {
 });
 // Inline buy-price entry: type in the box and press Enter (or leave the box).
 function commitAvg(input) {
-  const i = Number(input.dataset.avg), v = input.value.trim();
-  if (v === '') return render();
-  const n = toNum(v);
-  if (!(n >= 0)) return toast('Enter a valid price.');
-  holdings[i].avg = n; save();
-  input.blur(); render();
+  const i = Number(input.dataset.avg), v = input.value.trim(), h = holdings[i];
+  if (!h) return;
+  const n = v === '' ? null : toNum(v);
+  if (n !== null && !(n >= 0)) return toast('Enter a valid price.');
+  if (n !== h.avg) { h.avg = n; save(); if (n != null) toast(`Buy price saved for ${h.name || h.symbol}`, 1500); }
+  setTimeout(render);
 }
-$('holdings').addEventListener('keydown', (e) => {
-  if (!e.target.classList.contains('avgin')) return;
-  if (e.key === 'Enter') { e.preventDefault(); const next = e.target.closest('tr')?.nextElementSibling?.querySelector('.avgin'); commitAvg(e.target); next && $('holdings').querySelector(`[data-avg="${next.dataset.avg}"]`)?.focus(); }
-  if (e.key === 'Escape') { e.target.value = ''; e.target.blur(); }
-});
-$('holdings').addEventListener('focusout', (e) => { if (e.target.classList.contains('avgin') && e.target.value.trim()) commitAvg(e.target); else if (e.target.classList.contains('avgin')) setTimeout(render); });
+for (const box of [$('holdings'), $('cards')]) {
+  box.addEventListener('keydown', (e) => {
+    if (!e.target.classList.contains('avgin')) return;
+    if (e.key === 'Enter') { // save and jump to the next stock's box
+      e.preventDefault();
+      const next = e.target.closest('tr, .hcard')?.nextElementSibling?.querySelector('.avgin');
+      if (next) next.focus(); else e.target.blur();
+    }
+    if (e.key === 'Escape') { const h = holdings[Number(e.target.dataset.avg)]; e.target.value = h?.avg ?? ''; e.target.blur(); }
+  });
+  box.addEventListener('change', (e) => { if (e.target.classList.contains('avgin')) commitAvg(e.target); });
+  box.addEventListener('focusout', (e) => {
+    if (!e.target.classList.contains('avgin')) return;
+    commitAvg(e.target);
+  });
+}
 
 $('cards').addEventListener('click', (e) => {
+  if (e.target.closest('.costin')) return; // typing a buy price, not opening the editor
   const c = e.target.closest('[data-card]');
   if (c) openEdit(Number(c.dataset.card));
 });
@@ -624,7 +679,6 @@ document.addEventListener('click', (e) => {
   const m = document.querySelector('details.menu');
   if (m?.open && (!m.contains(e.target) || e.target.closest('.menulist button'))) m.open = false;
 });
-$('fileInput2').addEventListener('click', () => setTimeout(() => (document.querySelector('details.menu').open = false), 0));
 
 // ---------- PWA: offline support + install ----------
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
