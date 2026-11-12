@@ -200,7 +200,7 @@ function brokerOf(headerText) {
   for (const [re, name] of BROKERS) { const i = headerText.search(re); if (i >= 0 && i < at) { at = i; best = name; } }
   return best;
 }
-// "IndusInd · Johny", falling back to the last digits of the account number.
+// "IndusInd · Priya", falling back to the last digits of the account number.
 function accountLabel(broker, holder, id) {
   const first = holder ? titleCase(holder.trim().split(/\s+/)[0]) : '';
   if (broker && first) return `${broker} · ${first}`;

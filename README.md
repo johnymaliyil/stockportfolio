@@ -74,7 +74,7 @@ INE002A01018,4,
 
 ### Several demat accounts
 
-Each statement is tied to its account (DP / BO ID or client code) and named after the broker and holder, e.g. *Geojit · Leela*.
+Each statement is tied to its account (DP / BO ID or client code) and named after the broker and holder, e.g. *Geojit · Ravi*.
 A stock held in two accounts is shown once per account, with the broker in its name. Uploading a statement replaces **only that account's**
 holdings, so you can load every family account and switch between them, or view them combined, with the account picker in the
 header. A newer statement for the same account updates quantities and keeps the buy prices you typed in.
